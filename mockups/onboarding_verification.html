@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AMU Connect | Onboarding</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=Hanken+Grotesk:wght@600;700&amp;family=Geist:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "primary-fixed-dim": "#4edea3",
+                    "surface-variant": "#333539",
+                    "on-primary-fixed-variant": "#005236",
+                    "secondary": "#d0bcff",
+                    "tertiary-fixed": "#d8e2ff",
+                    "on-secondary-fixed-variant": "#5516be",
+                    "tertiary": "#adc6ff",
+                    "on-surface-variant": "#bbcabf",
+                    "on-error-container": "#ffdad6",
+                    "on-secondary-container": "#c4abff",
+                    "surface-bright": "#37393e",
+                    "background": "#111317",
+                    "surface-container-lowest": "#0c0e12",
+                    "surface": "#111317",
+                    "outline": "#86948a",
+                    "on-primary-container": "#00422b",
+                    "on-tertiary-fixed": "#001a42",
+                    "on-error": "#690005",
+                    "surface-dim": "#111317",
+                    "secondary-container": "#571bc1",
+                    "surface-container-low": "#1a1c20",
+                    "on-primary": "#003824",
+                    "error": "#ffb4ab",
+                    "on-tertiary-container": "#00367a",
+                    "outline-variant": "#3c4a42",
+                    "surface-container": "#1e2024",
+                    "on-background": "#e2e2e8",
+                    "surface-tint": "#4edea3",
+                    "surface-container-highest": "#333539",
+                    "on-surface": "#e2e2e8",
+                    "on-secondary-fixed": "#23005c",
+                    "primary": "#4edea3",
+                    "error-container": "#93000a",
+                    "on-tertiary": "#002e6a",
+                    "inverse-surface": "#e2e2e8",
+                    "tertiary-fixed-dim": "#adc6ff",
+                    "inverse-on-surface": "#2f3035",
+                    "surface-container-high": "#282a2e",
+                    "secondary-fixed": "#e9ddff",
+                    "on-secondary": "#3c0091",
+                    "primary-container": "#10b981",
+                    "on-primary-fixed": "#002113",
+                    "inverse-primary": "#006c49",
+                    "on-tertiary-fixed-variant": "#004395",
+                    "tertiary-container": "#71a1ff",
+                    "primary-fixed": "#6ffbbe",
+                    "secondary-fixed-dim": "#d0bcff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "1rem",
+                    "lg": "2rem",
+                    "xl": "3rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "xs": "0.5rem",
+                    "margin-mobile": "1.25rem",
+                    "sm": "1rem",
+                    "md": "1.5rem",
+                    "gutter": "1rem",
+                    "xl": "3rem",
+                    "lg": "2rem",
+                    "base": "4px"
+            },
+            "fontFamily": {
+                    "label-sm": ["Geist"],
+                    "body-md": ["Inter"],
+                    "headline-md": ["Hanken Grotesk"],
+                    "display-lg": ["Hanken Grotesk"],
+                    "label-md": ["Geist"],
+                    "headline-md-mobile": ["Hanken Grotesk"],
+                    "body-lg": ["Inter"]
+            },
+            "fontSize": {
+                    "label-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                    "headline-md-mobile": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                    "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #0F1115;
+            color: #e2e2e8;
+            overflow-x: hidden;
+        }
+        .glass-panel {
+            background: rgba(26, 29, 35, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(36, 40, 48, 0.5);
+        }
+        .glow-button {
+            box-shadow: 0 0 20px rgba(78, 222, 163, 0.2);
+            transition: all 0.3s ease;
+        }
+        .glow-button:hover {
+            box-shadow: 0 0 30px rgba(78, 222, 163, 0.4);
+        }
+        .strachey-silhouette {
+            mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="min-h-screen flex flex-col items-center justify-center p-margin-mobile">
+<!-- Background Decorative Elements -->
+<div class="fixed inset-0 pointer-events-none">
+<div class="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-primary/10 rounded-full blur-[120px]"></div>
+<div class="absolute bottom-[-10%] left-[-10%] w-[400px] h-[400px] bg-secondary/5 rounded-full blur-[100px]"></div>
+</div>
+<!-- Main Content Canvas -->
+<main class="relative z-10 w-full max-w-md flex flex-col items-center text-center">
+<!-- Illustration: Stylized Silhouette of Bab-e-Syed/Strachey Hall -->
+<div class="mb-md opacity-40 strachey-silhouette w-full h-48 flex items-center justify-center overflow-hidden">
+<img alt="AMU Heritage Architecture" class="w-full h-full object-contain grayscale brightness-75 contrast-125" data-alt="A minimalist architectural vector illustration of a historic university gateway, stylized in a sleek modern aesthetic with clean geometric lines. The silhouette is rendered in deep charcoal and emerald green gradients against a dark background, evoking a sense of heritage and high-end digital identity. Soft atmospheric lighting highlights the arches and domes, maintaining a mysterious yet premium university atmosphere." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC9yvitrN1T_5K2OnwRnazBNeO2wPsMjSj4O9TBF_wge58U8vvglZe7UXFozlR1Q5tGOY8CPfVmC9VjWYY_xvY5rKGh9hDspQQ3rQYFudOKcRiv5MgAhyNlgpoOgCzyDToAFi1PPk_54ngCprzW0IPe4gfqgR9vmBUszpqm2d58JynLskIAm8Zo_4svq4xDMasEDHVAEGWHVxzUFenf1zRLgKfo1hX25g5hiPUsGzxqOUGrAMLwKWKXM6-bOFUHzxt41EqTaoRwPjaZ"/>
+</div>
+<!-- Branding Section -->
+<header class="mb-xl">
+<h1 class="text-display-lg font-display-lg text-on-surface mb-xs tracking-tight">
+                AMU Connect
+            </h1>
+<p class="text-body-lg font-body-lg text-on-surface-variant">
+                The anonymous heart of Aligarh.
+            </p>
+</header>
+<!-- Onboarding Form Card -->
+<section class="w-full glass-panel p-lg rounded-lg shadow-2xl">
+<form class="space-y-md" id="onboarding-form">
+<!-- Input Group -->
+<div class="text-left space-y-xs">
+<label class="text-label-md font-label-md text-on-surface-variant ml-1" for="email">University Email</label>
+<div class="relative group">
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-outline text-[20px]" data-icon="alternate_email">alternate_email</span>
+</div>
+<input class="w-full bg-surface-container-low border border-outline-variant/50 text-on-surface text-body-md font-body-md rounded-DEFAULT py-4 pl-12 pr-4 focus:ring-2 focus:ring-primary focus:border-transparent transition-all outline-none placeholder:text-outline/40" id="email" placeholder="yourname@myamu.ac.in" required="" type="email"/>
+</div>
+<p class="text-[12px] font-label-sm text-on-surface-variant px-1 mt-1 opacity-60" id="validation-msg">
+                        Must end with @myamu.ac.in or @amu.ac.in
+                    </p>
+</div>
+<!-- Action Button -->
+<button class="w-full bg-primary text-on-primary font-label-md text-label-md py-4 rounded-DEFAULT flex items-center justify-center gap-2 glow-button active:scale-[0.98] transition-all" id="submit-btn" type="submit">
+                    Verify &amp; Join
+                    <span class="material-symbols-outlined text-[20px]" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</form>
+<!-- Privacy Note -->
+<div class="mt-md flex items-start gap-3 text-left">
+<span class="material-symbols-outlined text-primary/70 text-[20px] mt-0.5" data-icon="lock" data-weight="fill" style="font-variation-settings: 'FILL' 1;">lock</span>
+<p class="text-label-sm font-label-sm text-on-surface-variant leading-relaxed">
+                    Your email is only for verification and is <span class="text-primary-fixed-dim">never shown</span> to others. We value your anonymity above all.
+                </p>
+</div>
+</section>
+<!-- Footer Footer -->
+<footer class="mt-xl">
+<p class="text-label-sm font-label-sm text-outline">
+                By joining, you agree to the <a class="underline hover:text-primary transition-colors" href="#">Aligarh Code of Conduct</a>.
+            </p>
+</footer>
+</main>
+<!-- Success Overlay (Hidden by default) -->
+<div class="fixed inset-0 z-50 bg-background/95 flex items-center justify-center p-margin-mobile opacity-0 pointer-events-none transition-opacity duration-500" id="success-overlay">
+<div class="text-center space-y-md">
+<div class="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-md">
+<span class="material-symbols-outlined text-primary text-[40px] animate-bounce" data-icon="mark_email_unread">mark_email_unread</span>
+</div>
+<h2 class="text-headline-md font-headline-md text-on-surface">Check your Inbox</h2>
+<p class="text-body-md font-body-md text-on-surface-variant max-w-xs">
+                We've sent a magic link to your AMU email. Click it to verify your account and join the community.
+            </p>
+<button class="text-label-md font-label-md text-primary mt-lg underline underline-offset-4" onclick="location.reload()">
+                Wait, I entered the wrong email
+            </button>
+</div>
+</div>
+<script>
+        const form = document.getElementById('onboarding-form');
+        const emailInput = document.getElementById('email');
+        const validationMsg = document.getElementById('validation-msg');
+        const successOverlay = document.getElementById('success-overlay');
+        const submitBtn = document.getElementById('submit-btn');
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const email = emailInput.value.toLowerCase();
+            
+            // Simple validation for the demo
+            if (email.endsWith('@myamu.ac.in') || email.endsWith('@amu.ac.in')) {
+                // Trigger success UI
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="material-symbols-outlined animate-spin" data-icon="progress_activity">progress_activity</span> Verifying...';
+                
+                setTimeout(() => {
+                    successOverlay.classList.remove('opacity-0', 'pointer-events-none');
+                }, 1200);
+            } else {
+                // Show error
+                emailInput.classList.add('border-error');
+                validationMsg.classList.remove('text-on-surface-variant', 'opacity-60');
+                validationMsg.classList.add('text-error');
+                validationMsg.innerText = 'Please use a valid AMU university email address.';
+                
+                // Shake animation
+                form.animate([
+                    { transform: 'translateX(-5px)' },
+                    { transform: 'translateX(5px)' },
+                    { transform: 'translateX(-5px)' },
+                    { transform: 'translateX(0)' }
+                ], { duration: 300 });
+            }
+        });
+
+        // Reset error on input
+        emailInput.addEventListener('input', () => {
+            emailInput.classList.remove('border-error');
+            validationMsg.classList.add('text-on-surface-variant', 'opacity-60');
+            validationMsg.classList.remove('text-error');
+            validationMsg.innerText = 'Must end with @myamu.ac.in or @amu.ac.in';
+        });
+    </script>
+</body></html>
