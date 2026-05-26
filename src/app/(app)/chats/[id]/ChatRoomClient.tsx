@@ -29,6 +29,19 @@ type SwipeState = {
   longPressTimer?: ReturnType<typeof setTimeout>;
 };
 
+const POPULAR_EMOJIS = [
+  "😂", "❤️", "👍", "🔥", "😍", "😭", "😊", "🙏",
+  "🤔", "💀", "🤣", "🥺", "👀", "😮", "👏", "🎉",
+  "🥳", "💯", "🤫", "🤡", "🫠", "🧐", "😎", "🙄",
+  "😢", "😡", "💩", "💡", "📌", "🚀", "✨", "📱"
+];
+
+const isEmojiOnly = (text: string) => {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /^[\p{Extended_Pictographic}\s\u200d\ufe0f]+$/u.test(trimmed);
+};
+
 function getReplyDraft(message: Message, currentUserId: string): ReplyDraft {
   return {
     messageId: message.id,
@@ -46,7 +59,7 @@ export default function ChatRoomClient({
   currentUserId,
 }: ChatRoomClientProps) {
   const router = useRouter();
-  const { patchRoom } = useInboxStore();
+  const { rooms, patchRoom } = useInboxStore();
   const roomData = initialRoomData;
   const [inputText, setInputText] = useState("");
   const [showOptions, setShowOptions] = useState(false);
@@ -61,6 +74,11 @@ export default function ChatRoomClient({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
+  const [forwardedRoomIds, setForwardedRoomIds] = useState<Set<string>>(new Set());
+  const [forwardingRoomId, setForwardingRoomId] = useState<string | null>(null);
   const [selectedPeerProfile, setSelectedPeerProfile] = useState<{ id: string; nickname: string; avatar_emoji: string } | null>(null);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
 
@@ -263,6 +281,7 @@ export default function ChatRoomClient({
     setReplyingTo(null);
     setTypingStatus(false);
     setShowNewMessages(false);
+    setShowEmojiPicker(false);
     requestAnimationFrame(() => scrollToBottom("smooth"));
   };
 
@@ -514,6 +533,44 @@ export default function ChatRoomClient({
         showToast("Failed to securely share image. Please try again.", "error");
         setIsUploading(false);
       }
+    }
+  };
+
+  const handleCameraUpload = () => {
+    cameraInputRef.current?.click();
+  };
+
+  const handleForwardSelect = async (targetRoomId: string) => {
+    if (!forwardingMessage) return;
+    setForwardingRoomId(targetRoomId);
+    try {
+      const supabase = createClient();
+      
+      const { error } = await supabase
+        .from("messages")
+        .insert({
+          room_id: targetRoomId,
+          sender_id: currentUserId,
+          content: forwardingMessage.content,
+          type: forwardingMessage.type,
+          media_url: forwardingMessage.media_url || null,
+          is_forwarded: true,
+        });
+
+      if (error) throw error;
+      
+      setForwardedRoomIds((prev) => {
+        const next = new Set(prev);
+        next.add(targetRoomId);
+        return next;
+      });
+      
+      showToast("Message forwarded", "success");
+    } catch (err: any) {
+      console.error("Failed to forward message:", err?.message || err?.details || err);
+      showToast("Failed to forward message", "error");
+    } finally {
+      setForwardingRoomId(null);
     }
   };
 
@@ -804,12 +861,37 @@ export default function ChatRoomClient({
                     style={{
                       transform: `translateX(${swipeOffset}px)`,
                     }}
-                    className={`p-3.5 rounded-2xl relative shadow-md cursor-pointer transition-transform touch-pan-y select-none active:scale-[0.98] ${
-                      isMine
-                        ? "bg-[#00F0A0] text-black font-semibold rounded-tr-none"
-                        : "bg-[#12121A] text-zinc-100 border border-zinc-900 rounded-tl-none"
+                    className={`p-3.5 rounded-2xl relative cursor-pointer transition-transform touch-pan-y select-none active:scale-[0.98] ${
+                      msg.type === "text" && isEmojiOnly(msg.content)
+                        ? "bg-transparent shadow-none border-none !p-1 text-white"
+                        : isMine
+                        ? "bg-[#00F0A0] text-black font-semibold rounded-tr-none shadow-md"
+                        : "bg-[#12121A] text-zinc-100 border border-zinc-900 rounded-tl-none shadow-md"
                     }`}
                   >
+                    {msg.is_forwarded && (
+                      <div className="flex items-center gap-1 mb-1.5 opacity-60">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className={isMine && !(msg.type === "text" && isEmojiOnly(msg.content)) ? "text-black" : "text-zinc-400"}
+                        >
+                          <polyline points="15 17 20 12 15 7" />
+                          <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+                        </svg>
+                        <span className={`text-[9px] font-black uppercase tracking-wider ${isMine && !(msg.type === "text" && isEmojiOnly(msg.content)) ? "text-black/80" : "text-zinc-500"}`}>
+                          Forwarded
+                        </span>
+                      </div>
+                    )}
+
                     {msg.reply_to_content && (
                       <button
                         type="button"
@@ -844,7 +926,11 @@ export default function ChatRoomClient({
                         )}
                       </div>
                     ) : (
-                      <p className="text-[14px] leading-relaxed break-words font-sans">
+                      <p className={`leading-relaxed break-words font-sans ${
+                        msg.type === "text" && isEmojiOnly(msg.content)
+                          ? "text-[32px] md:text-[36px]"
+                          : "text-[14px]"
+                      }`}>
                         {msg.content}
                       </p>
                     )}
@@ -1000,17 +1086,47 @@ export default function ChatRoomClient({
           </div>
         )}
 
-        <form onSubmit={handleSend} className="flex items-center gap-3 w-full">
+        {showEmojiPicker && (
+          <div className="mb-3 bg-[#12121A]/95 border border-zinc-800 rounded-2xl shadow-xl p-3 z-45 animate-in slide-in-from-bottom-2 fade-in duration-150 backdrop-blur-xl">
+            <div className="flex justify-between items-center mb-2 px-1">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-sans">Popular Emojis</span>
+              <button
+                type="button"
+                onClick={() => setShowEmojiPicker(false)}
+                className="text-zinc-500 hover:text-white text-xs cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid grid-cols-8 gap-2">
+              {POPULAR_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => {
+                    setInputText((prev) => prev + emoji);
+                  }}
+                  className="h-9 rounded-lg hover:bg-zinc-800/80 active:scale-90 transition-all flex items-center justify-center text-xl cursor-pointer"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleSend} className="flex items-center gap-2.5 w-full">
           {/* Media Attach button */}
           <button
             type="button"
             onClick={handleFileUpload}
-            className="w-12 h-12 rounded-full bg-[#12121A] border border-zinc-850 hover:border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90 duration-200 cursor-pointer shadow-sm"
+            className="w-11 h-11 rounded-full bg-[#12121A] border border-zinc-850 hover:border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90 duration-200 cursor-pointer shadow-sm shrink-0"
+            title="Attach Image"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
+              width="18"
+              height="18"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -1023,23 +1139,70 @@ export default function ChatRoomClient({
             </svg>
           </button>
 
+          {/* Camera Capture button */}
+          <button
+            type="button"
+            onClick={handleCameraUpload}
+            className="w-11 h-11 rounded-full bg-[#12121A] border border-zinc-850 hover:border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90 duration-200 cursor-pointer shadow-sm shrink-0"
+            title="Take Photo"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+          </button>
+
           {/* Text Input area */}
-          <div className="flex-1 bg-[#12121A]/70 border border-zinc-900 rounded-full flex items-center px-4 py-2 h-12 shadow-inner focus-within:border-zinc-850 transition-colors">
+          <div className="flex-1 bg-[#12121A]/70 border border-zinc-900 rounded-full flex items-center px-4 py-2 h-11 shadow-inner focus-within:border-zinc-850 transition-colors relative">
             <input
               type="text"
               required
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              className="bg-transparent border-none text-white text-[14px] placeholder-zinc-600 w-full focus:ring-0 focus:outline-none font-sans"
+              className="bg-transparent border-none text-white text-[14px] placeholder-zinc-650 w-full focus:ring-0 focus:outline-none font-sans pr-8"
               placeholder={`Message in anonymous room...`}
             />
+            {/* Emoji Trigger Button */}
+            <button
+              type="button"
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+              className="absolute right-3.5 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+              title="Emojis"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                <line x1="9" y1="9" x2="9.01" y2="9" />
+                <line x1="15" y1="9" x2="15.01" y2="9" />
+              </svg>
+            </button>
           </div>
 
           {/* Send FAB Button */}
           <button
             type="submit"
             disabled={!inputText.trim()}
-            className="w-12 h-12 rounded-full bg-[#00F0A0] text-black flex items-center justify-center shadow-[0_4px_16px_rgba(0,240,160,0.3)] disabled:opacity-40 disabled:shadow-none hover:scale-105 active:scale-90 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed"
+            className="w-11 h-11 rounded-full bg-[#00F0A0] text-black flex items-center justify-center shadow-[0_4px_16px_rgba(0,240,160,0.3)] disabled:opacity-40 disabled:shadow-none hover:scale-105 active:scale-90 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed shrink-0"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -1103,7 +1266,7 @@ export default function ChatRoomClient({
               ))}
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={() => handleReplyToMessage(selectedMessage)}
@@ -1147,6 +1310,32 @@ export default function ChatRoomClient({
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                 </svg>
                 <span className="text-[10px] font-bold">Copy</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setForwardingMessage(selectedMessage);
+                  setForwardedRoomIds(new Set());
+                  setSelectedMessage(null);
+                }}
+                className="h-16 rounded-2xl bg-[#08080C] border border-zinc-900 text-zinc-200 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="15 17 20 12 15 7" />
+                  <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+                </svg>
+                <span className="text-[10px] font-bold">Forward</span>
               </button>
 
               <button
@@ -1297,6 +1486,118 @@ export default function ChatRoomClient({
         accept="image/*"
         className="hidden"
       />
+
+      {/* Hidden file input specifically for camera capture */}
+      <input
+        type="file"
+        ref={cameraInputRef}
+        onChange={handleFileChange}
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+      />
+
+      {/* Forward Message Bottom Sheet / Modal */}
+      {forwardingMessage && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/45 backdrop-blur-[2px] flex items-end justify-center"
+          onClick={() => {
+            setForwardingMessage(null);
+            setForwardedRoomIds(new Set());
+          }}
+        >
+          <div
+            className="w-full max-w-[480px] bg-[#12121A] border-t border-zinc-800 rounded-t-3xl shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in slide-in-from-bottom-4 fade-in duration-150"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-zinc-700 mx-auto mb-5 shrink-0" />
+
+            <div className="flex items-center justify-between mb-4 shrink-0">
+              <h3 className="text-base font-bold text-white tracking-tight">
+                Forward Message
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setForwardingMessage(null);
+                  setForwardedRoomIds(new Set());
+                }}
+                className="text-xs text-zinc-500 hover:text-white cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+
+            {/* Preview of forwarded content */}
+            <div className="p-3 bg-[#08080C] border border-zinc-900 rounded-xl mb-4 shrink-0 flex items-center gap-3">
+              {forwardingMessage.type === "image" && forwardingMessage.media_url ? (
+                <>
+                  <div className="w-10 h-10 rounded bg-zinc-900 border border-zinc-800 overflow-hidden shrink-0">
+                    <img src={forwardingMessage.media_url} alt="Preview" className="w-full h-full object-cover" />
+                  </div>
+                  <span className="text-xs text-zinc-400 font-sans italic truncate">Photo</span>
+                </>
+              ) : (
+                <p className="text-xs text-zinc-400 font-sans line-clamp-2 leading-relaxed">
+                  {forwardingMessage.content}
+                </p>
+              )}
+            </div>
+
+            {/* List of rooms */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-4">
+              {rooms.length === 0 ? (
+                <p className="text-xs text-zinc-500 text-center py-6 font-sans">No active chats found.</p>
+              ) : (
+                rooms.map((room) => {
+                  const isSent = forwardedRoomIds.has(room.id);
+                  const isSending = forwardingRoomId === room.id;
+
+                  return (
+                    <div
+                      key={room.id}
+                      className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-900/20 border border-zinc-950 hover:bg-zinc-900/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800 flex items-center justify-center text-lg select-none">
+                          {room.avatar_emoji}
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs font-bold text-white truncate">{room.name}</span>
+                          <span className="text-[9px] text-zinc-500 uppercase tracking-wider font-sans font-black mt-0.5">
+                            {room.type === "group" ? "Group Chat" : "Private Chat"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isSent || isSending}
+                        onClick={() => handleForwardSelect(room.id)}
+                        className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 cursor-pointer ${
+                          isSent
+                            ? "bg-zinc-800 text-zinc-500 border border-zinc-800 cursor-default"
+                            : isSending
+                            ? "bg-[#00F0A0]/10 border border-[#00F0A0]/20 text-[#00F0A0] cursor-default"
+                            : "bg-[#00F0A0] text-black hover:scale-105 active:scale-95 shadow-sm"
+                        }`}
+                      >
+                        {isSending ? (
+                          <div className="w-3 h-3 border-2 border-[#00F0A0] border-t-transparent rounded-full animate-spin mx-2" />
+                        ) : isSent ? (
+                          "Sent"
+                        ) : (
+                          "Send"
+                        )}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Editor Overlay Modal */}
       {selectedFile && (

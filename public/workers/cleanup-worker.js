@@ -4,7 +4,7 @@
 // This ensures perfect compatibility with Next.js static files.
 
 const DB_NAME = 'VeiloLocalDB';
-const DB_VERSION = 220;
+const DB_VERSION = 9999;
 const BATCH_SIZE = 40;
 const BATCH_DELAY_MS = 50;
 

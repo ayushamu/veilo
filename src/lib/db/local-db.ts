@@ -36,6 +36,7 @@ export interface LocalMessage {
   reply_to_message_id?: string;
   reply_to_content?: string;
   reply_to_sender_nickname?: string;
+  is_forwarded?: boolean;
   has_media: number; // 0 or 1
   media_metadata?: MediaMetadata;
   reactions?: { [emoji: string]: string[] }; // Store nested reactions map in local IndexedDB document
@@ -47,7 +48,7 @@ export class VeiloLocalDB extends Dexie {
 
   constructor() {
     super('VeiloLocalDB');
-    this.version(220).stores({
+    this.version(9999).stores({
       rooms: 'id, last_message_at, last_opened_at',
       messages: 'id, room_id, created_at, type, has_media, [room_id+created_at]'
     });

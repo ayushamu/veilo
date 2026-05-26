@@ -127,3 +127,20 @@ export async function verifyOTP(
     };
   }
 }
+
+/**
+ * Signs the user out of their Supabase Auth session.
+ */
+export async function signOut(): Promise<ActionResponse> {
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    return { success: true };
+  } catch (err) {
+    console.error("Sign out server error:", err);
+    return { success: false, message: "Server error during sign out." };
+  }
+}

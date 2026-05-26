@@ -23,6 +23,7 @@ export interface Message {
   reply_to_message_id?: string;
   reply_to_content?: string;
   reply_to_sender_nickname?: string;
+  is_forwarded?: boolean;
   delivery_status?: "sending" | "sent" | "failed";
   error_message?: string;
   has_media?: number;
@@ -68,6 +69,7 @@ type RawMessage = {
   reply_to_message_id?: string | null;
   reply_to_content?: string | null;
   reply_to_sender_nickname?: string | null;
+  is_forwarded?: boolean | null;
   profiles?: RawProfile | RawProfile[] | null;
 };
 
@@ -153,6 +155,7 @@ function formatMessage(msg: RawMessage): Message {
     reply_to_message_id: msg.reply_to_message_id || undefined,
     reply_to_content: msg.reply_to_content || undefined,
     reply_to_sender_nickname: msg.reply_to_sender_nickname || undefined,
+    is_forwarded: msg.is_forwarded || false,
     delivery_status: "sent",
     reactions: {},
     has_media: msg.type === "image" ? 1 : 0
@@ -294,6 +297,7 @@ export function useChat(roomId: string, currentUserId: string) {
               reply_to_message_id: msg.reply_to_message_id,
               reply_to_content: msg.reply_to_content,
               reply_to_sender_nickname: msg.reply_to_sender_nickname,
+              is_forwarded: msg.is_forwarded,
               has_media: msg.type === "image" ? 1 : 0,
               reactions: msg.reactions
             };
@@ -454,6 +458,7 @@ export function useChat(roomId: string, currentUserId: string) {
             reply_to_message_id: newMsg.reply_to_message_id || undefined,
             reply_to_content: newMsg.reply_to_content || undefined,
             reply_to_sender_nickname: newMsg.reply_to_sender_nickname || undefined,
+            is_forwarded: newMsg.is_forwarded || false,
             reactions: {},
             delivery_status: "sent",
           };
@@ -473,6 +478,7 @@ export function useChat(roomId: string, currentUserId: string) {
             reply_to_message_id: formattedMsg.reply_to_message_id,
             reply_to_content: formattedMsg.reply_to_content,
             reply_to_sender_nickname: formattedMsg.reply_to_sender_nickname,
+            is_forwarded: formattedMsg.is_forwarded,
             has_media: formattedMsg.type === "image" ? 1 : 0,
             reactions: {}
           };
@@ -729,6 +735,7 @@ export function useChat(roomId: string, currentUserId: string) {
           reply_to_message_id: data.reply_to_message_id || undefined,
           reply_to_content: data.reply_to_content || undefined,
           reply_to_sender_nickname: data.reply_to_sender_nickname || undefined,
+          is_forwarded: data.is_forwarded || false,
           has_media: data.type === "image" ? 1 : 0,
           media_metadata: isImage ? {
             width: options.width,
