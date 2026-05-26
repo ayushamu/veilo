@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ChatRoomClient from "./ChatRoomClient";
 
@@ -73,6 +73,8 @@ export default async function ChatRoomPage({ params }: PageProps) {
           }
         }
       }
+    } else {
+      notFound();
     }
   }
 
