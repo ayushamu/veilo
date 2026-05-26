@@ -5,16 +5,24 @@ import { useRouter } from "next/navigation";
 import { sendOTP } from "@/app/actions/auth";
 import { getActiveUserCount } from "@/app/actions/profile";
 
-const MOCK_ANNOUNCEMENTS = [
-  "🦊 Silent Falcon just verified their @myamu.ac.in email!",
-  "🦉 Midnight Owl entered the campus chat!",
-  "🐺 Velvet Leopard is typing in the Global Chat...",
-  "🌱 Emerald Stag just joined the university network!",
-  "🐱‍👤 Cosmic Shadow just verified their @amu.ac.in email!",
-  "🐲 Zenith Dragon entered the campus chat!",
-  "🤖 Neon Cyber joined the campus network!",
-  "👻 Mystic Specter is reacting in the Global Chat..."
+interface SignupEvent {
+  emoji: string;
+  name: string;
+  domain: string;
+  action: string;
+}
+
+const MOCK_SIGNUPS: SignupEvent[] = [
+  { emoji: "🦊", name: "Silent Falcon", domain: "@myamu.ac.in", action: "just verified their student email!" },
+  { emoji: "🦉", name: "Midnight Owl", domain: "@amu.ac.in", action: "entered the campus group chat!" },
+  { emoji: "🐺", name: "Velvet Leopard", domain: "@myamu.ac.in", action: "joined the campus network!" },
+  { emoji: "🦌", name: "Emerald Stag", domain: "@myamu.ac.in", action: "just verified their student email!" },
+  { emoji: "🐱‍👤", name: "Cosmic Shadow", domain: "@amu.ac.in", action: "entered the campus group chat!" },
+  { emoji: "🐲", name: "Zenith Dragon", domain: "@myamu.ac.in", action: "joined the campus network!" },
+  { emoji: "🤖", name: "Neon Cyber", domain: "@amu.ac.in", action: "just verified their student email!" },
+  { emoji: "👻", name: "Mystic Specter", domain: "@myamu.ac.in", action: "entered the campus group chat!" },
 ];
+
 
 const TERMS_SECTIONS = [
   {
@@ -139,8 +147,10 @@ export default function LoginPage() {
   const [showEmailHelp, setShowEmailHelp] = useState(false);
   
   const [activeUserCount, setActiveUserCount] = useState<number | null>(null);
-  const [currentAnnouncement, setCurrentAnnouncement] = useState<string | null>(null);
-  const [announcementKey, setAnnouncementKey] = useState(0);
+  const [currentToast, setCurrentToast] = useState<SignupEvent | null>(null);
+  const [toastVisible, setToastVisible] = useState(false);
+  const [isIncrementing, setIsIncrementing] = useState(false);
+  const [showPlusOne, setShowPlusOne] = useState(false);
 
   // Load active user count on mount
   useEffect(() => {
@@ -153,26 +163,56 @@ export default function LoginPage() {
     fetchCount();
   }, []);
 
-  // Cycle through mock announcements with sliding animations
+  // Cycle through mock signups and trigger animated notifications & counter increments
   useEffect(() => {
-    // Show first announcement after 2 seconds
+    // Show first toast after 3 seconds
     const initialDelay = setTimeout(() => {
-      setCurrentAnnouncement(MOCK_ANNOUNCEMENTS[0]);
-      setAnnouncementKey((k) => k + 1);
-    }, 2000);
+      const event = MOCK_SIGNUPS[0];
+      setCurrentToast(event);
+      setToastVisible(true);
+      setActiveUserCount((prev) => (prev !== null ? prev + 1 : null));
+      setIsIncrementing(true);
+      setShowPlusOne(true);
+      setTimeout(() => setIsIncrementing(false), 1200);
+      setTimeout(() => setShowPlusOne(false), 2000);
+      setTimeout(() => setToastVisible(false), 4500);
+    }, 3000);
 
-    const interval = setInterval(() => {
-      setCurrentAnnouncement((curr) => {
-        const currentIndex = MOCK_ANNOUNCEMENTS.indexOf(curr || "");
-        const nextIndex = (currentIndex + 1) % MOCK_ANNOUNCEMENTS.length;
-        setAnnouncementKey((k) => k + 1);
-        return MOCK_ANNOUNCEMENTS[nextIndex];
-      });
-    }, 7000);
+    const cycleInterval = setInterval(() => {
+      // Pick a random event
+      const randomIndex = Math.floor(Math.random() * MOCK_SIGNUPS.length);
+      const event = MOCK_SIGNUPS[randomIndex];
+
+      // 1. Show Toast
+      setCurrentToast(event);
+      setToastVisible(true);
+
+      // 2. Increment active student count live by +1
+      setActiveUserCount((prev) => (prev !== null ? prev + 1 : null));
+
+      // 3. Highlight counter + show floating '+1 Student' label
+      setIsIncrementing(true);
+      setShowPlusOne(true);
+
+      // Clear highlight and plus-one bubble after short duration
+      setTimeout(() => {
+        setIsIncrementing(false);
+      }, 1200);
+
+      setTimeout(() => {
+        setShowPlusOne(false);
+      }, 2000);
+
+      // 4. Hide toast after 4.5 seconds
+      setTimeout(() => {
+        setToastVisible(false);
+      }, 4500);
+
+    }, 14000); // Triggers every 14 seconds to build dynamic campus activity feel
 
     return () => {
       clearTimeout(initialDelay);
-      clearInterval(interval);
+      clearInterval(cycleInterval);
     };
   }, []);
 
@@ -203,11 +243,78 @@ export default function LoginPage() {
           from { transform: translateY(100%); opacity: 0; }
           to { transform: translateY(0); opacity: 1; }
         }
-        @keyframes slideInUp {
-          from { transform: translateY(15px); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
+        @keyframes toastIn {
+          0% { transform: translate(-50%, -40px) scale(0.92); opacity: 0; }
+          100% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+        }
+        @keyframes toastOut {
+          0% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+          100% { transform: translate(-50%, -40px) scale(0.92); opacity: 0; }
+        }
+        @keyframes counterPulse {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.08); background-color: rgba(0, 240, 160, 0.25); border-color: rgba(0, 240, 160, 0.5); box-shadow: 0 0 16px rgba(0, 240, 160, 0.2); }
+          100% { transform: scale(1); }
+        }
+        @keyframes floatBadgeUp {
+          0% { transform: translateY(5px); opacity: 0; }
+          20% { opacity: 1; }
+          100% { transform: translateY(-22px); opacity: 0; }
+        }
+        @keyframes shrinkWidth {
+          0% { width: 100%; }
+          100% { width: 0%; }
         }
       `}</style>
+
+      {/* Floating Verification Toast Notification */}
+      {currentToast && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-[400px] pointer-events-none"
+        >
+          <div
+            className="w-full bg-[#12121A]/95 border border-[#00F0A0]/20 backdrop-blur-xl p-3.5 rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.85)] flex items-center gap-3 pointer-events-auto overflow-hidden relative"
+            style={{
+              animation: toastVisible 
+                ? "toastIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards" 
+                : "toastOut 0.4s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards"
+            }}
+          >
+            {/* Glowing Icon Container */}
+            <div className="w-10 h-10 rounded-full bg-[#00F0A0]/10 border border-[#00F0A0]/35 flex items-center justify-center text-xl shrink-0 shadow-[0_0_12px_rgba(0,240,160,0.15)] animate-pulse">
+              {currentToast.emoji}
+            </div>
+            
+            {/* Details */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-black text-white tracking-wide truncate">{currentToast.name}</span>
+                <span className="text-[8px] bg-[#00F0A0]/10 border border-[#00F0A0]/25 text-[#00F0A0] px-1.5 py-0.5 rounded font-black font-sans uppercase shrink-0">
+                  {currentToast.domain}
+                </span>
+              </div>
+              <p className="text-[10px] text-zinc-400 font-medium font-sans truncate mt-0.5 leading-normal">
+                {currentToast.action}
+              </p>
+            </div>
+
+            {/* Verification status chip */}
+            <div className="shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-[#00F0A0]/15 border border-[#00F0A0]/30 text-[#00F0A0] text-[10px] font-bold shadow-[0_0_8px_rgba(0,240,160,0.1)]">
+              ✓
+            </div>
+
+            {/* Toast Lifetime Progress Bar */}
+            {toastVisible && (
+              <div 
+                className="absolute bottom-0 left-0 h-[2px] bg-gradient-to-r from-[#00F0A0] to-[#00D2FF]"
+                style={{
+                  animation: "shrinkWidth 4.5s linear forwards"
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Background Decorative Blur Blobs */}
       <div className="absolute inset-0 pointer-events-none">
@@ -233,29 +340,33 @@ export default function LoginPage() {
           <p className="text-base text-zinc-400 font-medium">
             The anonymous heart of Aligarh.
           </p>
-          <div className="flex items-center gap-1.5 mt-3.5 bg-[#00F0A0]/10 border border-[#00F0A0]/20 px-3.5 py-1.5 rounded-full shadow-[0_0_12px_rgba(0,240,160,0.05)]">
+          <div 
+            className={`flex items-center gap-1.5 mt-3.5 bg-[#00F0A0]/10 border border-[#00F0A0]/20 px-3.5 py-1.5 rounded-full relative transition-all duration-300 ${
+              isIncrementing ? "shadow-[0_0_20px_rgba(0,240,160,0.25)]" : "shadow-[0_0_12px_rgba(0,240,160,0.05)]"
+            }`}
+            style={{
+              animation: isIncrementing ? "counterPulse 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275)" : "none"
+            }}
+          >
             <span className="w-1.5 h-1.5 bg-[#00F0A0] rounded-full shadow-[0_0_8px_rgba(0,240,160,0.6)] animate-pulse" />
-            <span className="text-[10px] font-black text-white uppercase tracking-wider font-sans">
+            <span className="text-[10px] font-black text-white uppercase tracking-wider font-sans select-none">
               {activeUserCount !== null ? `${activeUserCount} Active Students` : "Syncing Campus..."}
             </span>
+            {showPlusOne && (
+              <span 
+                className="absolute -right-16 -top-1 bg-[#00F0A0] text-black font-extrabold font-sans text-[8px] px-1.5 py-0.5 rounded-md shadow-lg pointer-events-none uppercase tracking-wider"
+                style={{
+                  animation: "floatBadgeUp 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards"
+                }}
+              >
+                +1 active
+              </span>
+            )}
           </div>
         </header>
 
-        {/* Mock Registration Activity Ticker */}
-        <div className="h-10 w-full mb-3 flex items-center justify-center overflow-hidden">
-          {currentAnnouncement && (
-            <div
-              key={announcementKey}
-              className="bg-[#12121A]/50 border border-zinc-900/60 rounded-full px-4 py-1.5 shadow-lg flex items-center gap-2 max-w-[90%] text-zinc-400 text-[11px] font-medium font-sans leading-normal tracking-wide"
-              style={{
-                animation: "slideInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards"
-              }}
-            >
-              <span className="w-1.5 h-1.5 bg-[#00F0A0] rounded-full shadow-[0_0_6px_rgba(0,240,160,0.4)]" />
-              <span className="truncate">{currentAnnouncement}</span>
-            </div>
-          )}
-        </div>
+        {/* Dynamic Activity Spacer */}
+        <div className="h-6 w-full mb-2" />
 
         {/* Onboarding Form Card */}
         <section className="w-full bg-[#12121A]/85 backdrop-blur-xl border border-zinc-800/80 p-6 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.7)] text-left">
