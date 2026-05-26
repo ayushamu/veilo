@@ -1,19 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect as reactUseLayoutEffect, useMemo, useRef, useState } from "react";
+
+const useLayoutEffect = typeof window !== "undefined" ? reactUseLayoutEffect : useEffect;
 import { useRouter } from "next/navigation";
 import { Message, ReplyDraft, useChat } from "@/hooks/use-chat";
 import { createClient } from "@/lib/supabase/client";
 import { submitSafetyReport } from "@/app/actions/report";
-import { useInboxStore } from "@/hooks/use-inbox-store";
+import { useInboxStore, type InboxState } from "@/hooks/use-inbox-store";
 import ImageEditorModal from "@/components/common/ImageEditorModal";
 import { optimizeAndStripImage } from "@/lib/utils/media";
 import { getPresignedUploadUrl } from "@/app/actions/media";
 import { resolveDirectMessageRoom } from "@/app/actions/chats";
+import MessageComposer from "@/components/common/MessageComposer";
+import { MessageBubble } from "@/components/chat/MessageBubble";
+import { localDB } from "@/lib/db/local-db";
+import { ImageViewerModal } from "@/components/chat/ImageViewerModal";
 
 interface ChatRoomClientProps {
   roomId: string;
-  initialRoomData: {
+  initialRoomData?: {
     name: string;
     avatar_emoji: string;
     type: "direct" | "group";
@@ -26,7 +32,6 @@ type SwipeState = {
   startX: number;
   startY: number;
   offset: number;
-  longPressTimer?: ReturnType<typeof setTimeout>;
 };
 
 const POPULAR_EMOJIS = [
@@ -59,9 +64,24 @@ export default function ChatRoomClient({
   currentUserId,
 }: ChatRoomClientProps) {
   const router = useRouter();
-  const { rooms, patchRoom } = useInboxStore();
-  const roomData = initialRoomData;
-  const [inputText, setInputText] = useState("");
+  
+  // Use scoped selector for patchRoom so updates to inbox rooms list do not trigger re-renders here
+  const patchRoom = useInboxStore(useCallback((state: InboxState) => state.patchRoom, []));
+  
+  const [roomData, setRoomData] = useState<{
+    name: string;
+    avatar_emoji: string;
+    type: "direct" | "group";
+    pinned_message_id?: string | null;
+  }>(initialRoomData || {
+    name: "Anonymous Room",
+    avatar_emoji: "💬",
+    type: "group",
+    pinned_message_id: null,
+  });
+
+  const [pinnedMessage, setPinnedMessage] = useState<Message | null>(null);
+
   const [showOptions, setShowOptions] = useState(false);
   const [reportingMessageId, setReportingMessageId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState("");
@@ -72,15 +92,113 @@ export default function ChatRoomClient({
   const [copyToast, setCopyToast] = useState("");
   const [swipeState, setSwipeState] = useState<SwipeState | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
-  const [forwardedRoomIds, setForwardedRoomIds] = useState<Set<string>>(new Set());
-  const [forwardingRoomId, setForwardingRoomId] = useState<string | null>(null);
   const [selectedPeerProfile, setSelectedPeerProfile] = useState<{ id: string; nickname: string; avatar_emoji: string } | null>(null);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
+
+  // Local-first client hydration for room metadata
+  useEffect(() => {
+    const resolveRoomDetails = async () => {
+      // 1. Try checking local IndexedDB first
+      const local = await localDB.rooms.get(roomId);
+      if (local) {
+        setRoomData({
+          name: local.name,
+          avatar_emoji: local.avatar_emoji,
+          type: local.type,
+          pinned_message_id: local.pinned_message_id || null,
+        });
+        if (!initialScrollDoneRef.current) {
+          const count = local.unread_count || 0;
+          initialUnreadCountRef.current = count;
+          scrollAnchorRef.current = count > 0 ? "unread" : "bottom";
+          console.log("[Veilo Scroll] Set anchor:", scrollAnchorRef.current, "unread count:", count);
+        }
+        return;
+      }
+
+      // 2. Fallback to Supabase lookup client-side
+      if (roomId === "00000000-0000-0000-0000-000000000000") {
+        const globalDetails = {
+          name: "Global AMU Chat",
+          avatar_emoji: "🎓",
+          type: "group" as const,
+          pinned_message_id: null,
+        };
+        setRoomData(globalDetails);
+        await localDB.rooms.put({
+          id: roomId,
+          name: globalDetails.name,
+          avatar_emoji: globalDetails.avatar_emoji,
+          type: globalDetails.type,
+          last_message: "Tap to start chatting...",
+          last_message_at: null,
+          last_opened_at: Date.now(),
+          unread_count: 0,
+          is_muted: 0,
+          pinned_message_id: null,
+        });
+        return;
+      }
+
+      const supabase = createClient();
+      const { data: dbRoom } = await supabase
+        .from("rooms")
+        .select("*")
+        .eq("id", roomId)
+        .maybeSingle();
+
+      if (dbRoom) {
+        let rName = dbRoom.name || "Anonymous Chat";
+        let rAvatar = dbRoom.avatar_emoji || "💬";
+        let rPinned = dbRoom.pinned_message_id || null;
+
+        if (dbRoom.type === "direct") {
+          const { data: peer } = await supabase
+            .from("room_participants")
+            .select("profile_id")
+            .eq("room_id", roomId)
+            .neq("profile_id", currentUserId)
+            .maybeSingle();
+
+          if (peer?.profile_id) {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("nickname, avatar_emoji")
+              .eq("id", peer.profile_id)
+              .maybeSingle();
+
+            if (profile) {
+              rName = profile.nickname;
+              rAvatar = profile.avatar_emoji;
+            }
+          }
+        }
+
+        const fetchedData = { name: rName, avatar_emoji: rAvatar, type: dbRoom.type, pinned_message_id: rPinned };
+        setRoomData(fetchedData);
+        
+        await localDB.rooms.put({
+          id: roomId,
+          name: rName,
+          avatar_emoji: rAvatar,
+          type: dbRoom.type,
+          last_message: "Tap to start chatting...",
+          last_message_at: null,
+          last_opened_at: Date.now(),
+          unread_count: 0,
+          is_muted: 0,
+          pinned_message_id: rPinned,
+        });
+      }
+    };
+
+    resolveRoomDetails();
+  }, [roomId, currentUserId]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -88,6 +206,12 @@ export default function ChatRoomClient({
   const initialScrollDoneRef = useRef(false);
   const previousNewestMessageIdRef = useRef<string | null>(null);
   const suppressNextClickRef = useRef(false);
+  const mainRef = useRef<HTMLElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialUnreadCountRef = useRef<number>(0);
+  const scrollAnchorRef = useRef<"bottom" | "unread" | null>("bottom");
+  const lastScrollHeightRef = useRef<number>(0);
+  const lastScrollTopRef = useRef<number>(0);
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
@@ -116,11 +240,131 @@ export default function ChatRoomClient({
     toggleReaction,
     setTypingStatus,
     markRoomRead,
+    deleteMessage,
+    pinMessage,
   } = useChat(roomId, currentUserId);
 
   const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
   const newestMessage = messages[0];
   const selectedIsMine = selectedMessage?.sender_id === currentUserId;
+
+  // Realtime subscription for room settings (e.g. pinned_message_id updates)
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`room-meta:${roomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "rooms",
+          filter: `id=eq.${roomId}`,
+        },
+        async (payload: any) => {
+          const newRoom = payload.new;
+          if (newRoom) {
+            console.log("Realtime room update received:", newRoom);
+            setRoomData((prev) => ({
+              ...prev,
+              pinned_message_id: newRoom.pinned_message_id || null,
+            }));
+            
+            // Also update IndexedDB
+            const local = await localDB.rooms.get(roomId);
+            if (local) {
+              await localDB.rooms.update(roomId, {
+                pinned_message_id: newRoom.pinned_message_id || null,
+              });
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId]);
+
+  // Resolve pinned message details dynamically when pinned_message_id is active
+  useEffect(() => {
+    const resolvePinnedMessage = async () => {
+      const pinId = roomData.pinned_message_id;
+      if (!pinId) {
+        setPinnedMessage(null);
+        return;
+      }
+
+      // Check current in-memory messages first
+      const foundInMemory = messages.find((m) => m.id === pinId);
+      if (foundInMemory) {
+        setPinnedMessage(foundInMemory);
+        return;
+      }
+
+      // Check local DB
+      const localMsg = await localDB.messages.get(pinId);
+      if (localMsg) {
+        setPinnedMessage({
+          id: localMsg.id,
+          room_id: localMsg.room_id,
+          sender_id: localMsg.sender_id,
+          sender_nickname: localMsg.sender_nickname,
+          sender_avatar: localMsg.sender_avatar,
+          content: localMsg.content,
+          type: localMsg.type,
+          media_url: localMsg.media_url,
+          created_at: localMsg.created_at,
+          reactions: localMsg.reactions,
+          client_message_id: undefined,
+          delivery_status: "sent",
+        });
+        return;
+      }
+
+      // Fetch from Supabase
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("messages")
+        .select(`*, profiles (nickname, avatar_emoji)`)
+        .eq("id", pinId)
+        .maybeSingle();
+
+      if (data) {
+        const formatted = {
+          id: data.id,
+          room_id: data.room_id,
+          sender_id: data.sender_id,
+          sender_nickname: data.profiles?.nickname || "Anonymous Student",
+          sender_avatar: data.profiles?.avatar_emoji || "👤",
+          content: data.content,
+          type: data.type,
+          media_url: data.media_url || undefined,
+          created_at: data.created_at,
+          delivery_status: "sent" as const,
+        };
+        setPinnedMessage(formatted);
+      } else {
+        setPinnedMessage(null);
+      }
+    };
+
+    resolvePinnedMessage();
+  }, [roomData.pinned_message_id, messages]);
+
+  const handleScrollToMessage = useCallback((messageId: string) => {
+    const el = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      
+      // Add a brief premium glow flash animation to the message bubble
+      el.classList.add("ring-2", "ring-amber-400/50", "ring-offset-2", "ring-offset-[#08080C]", "scale-[1.02]", "transition-all", "duration-500");
+      setTimeout(() => {
+        el.classList.remove("ring-2", "ring-amber-400/50", "ring-offset-2", "ring-offset-[#08080C]", "scale-[1.02]");
+      }, 1500);
+    }
+  }, []);
 
   const isNearBottom = useCallback(() => {
     const container = chatContainerRef.current;
@@ -131,6 +375,28 @@ export default function ChatRoomClient({
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
+
+  const scrollToUnread = useCallback(() => {
+    const container = chatContainerRef.current;
+    const separator = container?.querySelector('[data-unread-separator="true"]');
+    if (separator) {
+      separator.scrollIntoView({ behavior: "auto", block: "start" });
+    }
+  }, []);
+
+  const handleImageLoad = useCallback(() => {
+    if (!initialScrollDoneRef.current) return;
+
+    if (scrollAnchorRef.current === "bottom") {
+      scrollToBottom("auto");
+    } else if (scrollAnchorRef.current === "unread") {
+      scrollToUnread();
+    }
+  }, [scrollToBottom, scrollToUnread]);
+
+  const handleImageClick = useCallback((url: string) => {
+    setViewingImageUrl(url);
   }, []);
 
   useEffect(() => {
@@ -149,6 +415,22 @@ export default function ChatRoomClient({
     loadRoomState();
   }, [currentUserId, roomId]);
 
+  // Scroll anchoring adjustment when older messages are loaded to prevent layout jitter
+  useLayoutEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    if (lastScrollHeightRef.current > 0) {
+      const heightDifference = container.scrollHeight - lastScrollHeightRef.current;
+      if (heightDifference > 0) {
+        container.scrollTop = lastScrollTopRef.current + heightDifference;
+      }
+      // Reset refs
+      lastScrollHeightRef.current = 0;
+      lastScrollTopRef.current = 0;
+    }
+  }, [messages]);
+
   // Scroll and read-state rules for a stable chat viewport.
   useEffect(() => {
     if (loading || messages.length === 0) return;
@@ -156,7 +438,13 @@ export default function ChatRoomClient({
     const newestMessage = messages[0];
 
     if (!initialScrollDoneRef.current) {
-      scrollToBottom("auto");
+      if (scrollAnchorRef.current === "unread") {
+        requestAnimationFrame(() => {
+          scrollToUnread();
+        });
+      } else {
+        scrollToBottom("auto");
+      }
       initialScrollDoneRef.current = true;
       previousNewestMessageIdRef.current = newestMessage.id;
       markRoomRead();
@@ -178,6 +466,94 @@ export default function ChatRoomClient({
 
     previousNewestMessageIdRef.current = newestMessage.id;
   }, [currentUserId, isNearBottom, loading, markRoomRead, messages, scrollToBottom]);
+
+  // VisualViewport keyboard handling for mobile (Android/iOS) layout stability
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    const adjustLayout = () => {
+      if (!mainRef.current) return;
+      
+      const height = viewport.height;
+      mainRef.current.style.height = `${height}px`;
+      mainRef.current.style.minHeight = `${height}px`;
+      
+      // On mobile keyboards showing up, prevent double-scrolling of outer window
+      window.scrollTo(0, 0);
+      
+      // If user was near bottom, scroll messages to bottom to follow keyboard shift
+      if (isNearBottom()) {
+        scrollToBottom("auto");
+      }
+    };
+
+    // Use passive event listeners to avoid blocking main thread touch/scroll interactions
+    viewport.addEventListener("resize", adjustLayout, { passive: true });
+    viewport.addEventListener("scroll", adjustLayout, { passive: true });
+    
+    // Initial sync
+    adjustLayout();
+
+    return () => {
+      viewport.removeEventListener("resize", adjustLayout);
+      viewport.removeEventListener("scroll", adjustLayout);
+    };
+  }, [isNearBottom, scrollToBottom]);
+
+  // Cancel active long-press or swipe states when user scrolls the message container
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      setSwipeState((curr) => {
+        if (curr !== null) return null;
+        return curr;
+      });
+
+      if (initialScrollDoneRef.current) {
+        const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+        if (nearBottom) {
+          scrollAnchorRef.current = "bottom";
+        } else {
+          scrollAnchorRef.current = null;
+        }
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
+  // Profiling User Timing Metrics
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.performance && !loading) {
+      try {
+        if (performance.getEntriesByName("veilo-pointerdown").length > 0) {
+          performance.mark("veilo-content-rendered");
+          performance.measure(
+            "veilo-tap-to-content",
+            "veilo-pointerdown",
+            "veilo-content-rendered"
+          );
+          
+          const measure = performance.getEntriesByName("veilo-tap-to-content")[0];
+          console.log(`[Veilo Performance] Tap-to-content: ${measure.duration.toFixed(2)}ms`);
+        }
+      } catch (err) {
+        console.warn("Performance timing error:", err);
+      }
+    }
+  }, [loading]);
 
   useEffect(() => {
     if (!newestMessage || newestMessage.type === "system") return;
@@ -227,13 +603,11 @@ export default function ChatRoomClient({
         if (!entry.isIntersecting || loadingOlder) return;
 
         const previousHeight = container.scrollHeight;
-        const loadedCount = await loadMore();
+        const previousScrollTop = container.scrollTop;
+        lastScrollHeightRef.current = previousHeight;
+        lastScrollTopRef.current = previousScrollTop;
 
-        if (loadedCount > 0) {
-          requestAnimationFrame(() => {
-            container.scrollTop += container.scrollHeight - previousHeight;
-          });
-        }
+        await loadMore();
       },
       { root: container, rootMargin: "160px 0px 0px 0px" }
     );
@@ -243,20 +617,6 @@ export default function ChatRoomClient({
   }, [hasMore, loadMore, loading, loadingOlder, messages.length]);
 
   // Typing state timer
-  useEffect(() => {
-    if (!inputText) {
-      setTypingStatus(false);
-      return;
-    }
-
-    setTypingStatus(true);
-    const delayDebounceFn = setTimeout(() => {
-      setTypingStatus(false);
-    }, 1500); // 1.5s responsive typing debounce
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [inputText, setTypingStatus]);
-
   // Scroll to bottom when someone starts typing to reveal the typing bubbles
   useEffect(() => {
     if (typingUsers.length > 0 && isNearBottom()) {
@@ -266,24 +626,32 @@ export default function ChatRoomClient({
     }
   }, [typingUsers.length, isNearBottom, scrollToBottom]);
 
-  // Handle message send
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputText.trim()) return;
+  const handlePeerClick = useCallback((id: string, nickname: string, avatar: string) => {
+    setSelectedPeerProfile({
+      id,
+      nickname,
+      avatar_emoji: avatar,
+    });
+  }, []);
 
-    sendMessage(inputText.trim(), { replyTo: replyingTo });
+  const handleContextMenu = useCallback((event: React.MouseEvent, message: Message) => {
+    event.preventDefault();
+    setSelectedMessage(message);
+  }, []);
+
+  // Handle message send
+  const handleSendMessage = useCallback((text: string) => {
+    sendMessage(text, { replyTo: replyingTo });
     patchRoom(roomId, {
-      lastMessage: inputText.trim(),
+      lastMessage: text,
       lastMessageAt: new Date().toISOString(),
       unreadCount: 0,
     });
-    setInputText("");
     setReplyingTo(null);
     setTypingStatus(false);
     setShowNewMessages(false);
-    setShowEmojiPicker(false);
     requestAnimationFrame(() => scrollToBottom("smooth"));
-  };
+  }, [roomId, replyingTo, sendMessage, patchRoom, scrollToBottom, setTypingStatus]);
 
   const handleReplyToMessage = useCallback(
     (message: Message) => {
@@ -313,18 +681,22 @@ export default function ChatRoomClient({
   const handlePointerDown = useCallback((event: React.PointerEvent, message: Message) => {
     if (message.type === "system") return;
 
-    const longPressTimer = setTimeout(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+
+    longPressTimerRef.current = setTimeout(() => {
       suppressNextClickRef.current = true;
       setSelectedMessage(message);
       setSwipeState(null);
-    }, 420);
+      longPressTimerRef.current = null;
+    }, 500);
 
     setSwipeState({
       messageId: message.id,
       startX: event.clientX,
       startY: event.clientY,
       offset: 0,
-      longPressTimer,
     });
   }, []);
 
@@ -336,17 +708,27 @@ export default function ChatRoomClient({
         const deltaX = event.clientX - current.startX;
         const deltaY = event.clientY - current.startY;
 
-        if (Math.abs(deltaY) > 24 && Math.abs(deltaY) > Math.abs(deltaX)) {
-          if (current.longPressTimer) clearTimeout(current.longPressTimer);
+        const dragThreshold = 6;
+        if (Math.abs(deltaX) > dragThreshold || Math.abs(deltaY) > dragThreshold) {
+          if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+        }
+
+        if (Math.abs(deltaY) > 16 && Math.abs(deltaY) > Math.abs(deltaX)) {
           return null;
         }
 
-        if (deltaX <= 0) return current;
-        if (current.longPressTimer && deltaX > 8) clearTimeout(current.longPressTimer);
+        if (deltaX <= 0) {
+          return {
+            ...current,
+            offset: 0,
+          };
+        }
 
         return {
           ...current,
-          longPressTimer: undefined,
           offset: Math.min(deltaX, 74),
         };
       });
@@ -356,8 +738,12 @@ export default function ChatRoomClient({
 
   const handlePointerEnd = useCallback(
     (message: Message) => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+
       setSwipeState((current) => {
-        if (current?.longPressTimer) clearTimeout(current.longPressTimer);
         if (current?.messageId === message.id && current.offset >= 54) {
           suppressNextClickRef.current = true;
           setReplyingTo(getReplyDraft(message, currentUserId));
@@ -540,39 +926,7 @@ export default function ChatRoomClient({
     cameraInputRef.current?.click();
   };
 
-  const handleForwardSelect = async (targetRoomId: string) => {
-    if (!forwardingMessage) return;
-    setForwardingRoomId(targetRoomId);
-    try {
-      const supabase = createClient();
-      
-      const { error } = await supabase
-        .from("messages")
-        .insert({
-          room_id: targetRoomId,
-          sender_id: currentUserId,
-          content: forwardingMessage.content,
-          type: forwardingMessage.type,
-          media_url: forwardingMessage.media_url || null,
-          is_forwarded: true,
-        });
-
-      if (error) throw error;
-      
-      setForwardedRoomIds((prev) => {
-        const next = new Set(prev);
-        next.add(targetRoomId);
-        return next;
-      });
-      
-      showToast("Message forwarded", "success");
-    } catch (err: any) {
-      console.error("Failed to forward message:", err?.message || err?.details || err);
-      showToast("Failed to forward message", "error");
-    } finally {
-      setForwardingRoomId(null);
-    }
-  };
+  // Defer forwarding state to ForwardMessageModal
 
   // Submit report action
   const handleReportSubmit = async (e: React.FormEvent) => {
@@ -595,7 +949,10 @@ export default function ChatRoomClient({
   };
 
   return (
-    <main className="flex-1 flex flex-col bg-[#08080C] min-h-screen relative overflow-hidden">
+    <main
+      ref={mainRef}
+      className="flex-1 flex flex-col bg-[#08080C] min-h-screen relative overflow-hidden"
+    >
       {/* Background Decorative Blur */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-[-10%] right-[-10%] w-[300px] h-[300px] bg-[#00F0A0]/5 rounded-full blur-[90px]" />
@@ -634,11 +991,19 @@ export default function ChatRoomClient({
               <h1 className="text-[15px] font-bold text-white tracking-tight truncate">
                 {roomData.name}
               </h1>
-              <div className="flex items-center gap-1 mt-0.5">
+              <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="w-1.5 h-1.5 bg-[#00F0A0] rounded-full shadow-[0_0_6px_rgba(0,240,160,0.5)] animate-pulse" />
                 <span className="text-[9px] font-bold text-zinc-500 tracking-wider uppercase font-sans">
                   {roomData.type === "group" ? "Group Chat" : "Private Chat"}
                 </span>
+                {roomData.pinned_message_id && (
+                  <>
+                    <span className="text-zinc-650 text-[10px] select-none">•</span>
+                    <span className="text-[9px] font-black text-amber-400 uppercase tracking-wider font-sans flex items-center gap-0.5" data-testid="header-pinned-indicator">
+                      📌 Pinned
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -716,6 +1081,54 @@ export default function ChatRoomClient({
         </div>
       </header>
 
+      {/* Pinned Message Sticky Banner */}
+      {pinnedMessage && (
+        <div
+          data-testid="pinned-banner"
+          onClick={() => handleScrollToMessage(pinnedMessage.id)}
+          className="bg-[#12121A]/80 backdrop-blur-md border-b border-zinc-900/60 px-4 py-2.5 flex items-center justify-between gap-3 cursor-pointer hover:bg-[#161622]/95 active:bg-[#12121A] transition-all animate-in slide-in-from-top duration-200 z-30"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="text-sm flex-shrink-0" role="img" aria-label="Pinned">📌</span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
+                Pinned Message
+              </span>
+              <p className="text-xs text-zinc-200 truncate mt-0.5">
+                {pinnedMessage.type === "image" ? "Photo" : pinnedMessage.content}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="unpin-button"
+            onClick={async (e) => {
+              e.stopPropagation();
+              const prevPinnedId = roomData.pinned_message_id;
+              
+              // Optimistic update
+              setRoomData((prev) => ({ ...prev, pinned_message_id: null }));
+              const local = await localDB.rooms.get(roomId);
+              if (local) {
+                await localDB.rooms.update(roomId, { pinned_message_id: null });
+              }
+
+              const res = await pinMessage(null);
+              if (!res.success) {
+                // Rollback
+                setRoomData((prev) => ({ ...prev, pinned_message_id: prevPinnedId }));
+                if (local) {
+                  await localDB.rooms.update(roomId, { pinned_message_id: prevPinnedId });
+                }
+              }
+            }}
+            className="px-2.5 py-1 text-[9px] font-black text-[#FF4B72] border border-[#FF4B72]/20 hover:bg-[#FF4B72]/10 hover:border-[#FF4B72]/30 active:scale-95 transition-all rounded-full cursor-pointer uppercase tracking-wider flex-shrink-0"
+          >
+            Unpin
+          </button>
+        </div>
+      )}
+
       {/* Message Feed Display */}
       <div
         ref={chatContainerRef}
@@ -737,12 +1150,11 @@ export default function ChatRoomClient({
                   if (!container) return;
 
                   const previousHeight = container.scrollHeight;
-                  const loadedCount = await loadMore();
-                  if (loadedCount > 0) {
-                    requestAnimationFrame(() => {
-                      container.scrollTop += container.scrollHeight - previousHeight;
-                    });
-                  }
+                  const previousScrollTop = container.scrollTop;
+                  lastScrollHeightRef.current = previousHeight;
+                  lastScrollTopRef.current = previousScrollTop;
+
+                  await loadMore();
                 }}
                 className="text-[10px] font-black text-[#00F0A0] uppercase tracking-wider font-sans cursor-pointer"
               >
@@ -771,239 +1183,62 @@ export default function ChatRoomClient({
             <p className="text-zinc-500 text-xs font-sans">Say something to start the conversation anonymously.</p>
           </div>
         ) : (
-          displayMessages.map((msg) => {
+          displayMessages.map((msg, index) => {
             const isMine = msg.sender_id === currentUserId;
             const swipeOffset =
               swipeState?.messageId === msg.id ? swipeState.offset : 0;
-            
-            if (msg.type === "system") {
-              return (
-                <div key={msg.id} className="flex justify-center my-2 select-none animate-in fade-in duration-300">
-                  <span className="px-3.5 py-1 bg-zinc-900/60 text-[9px] font-black text-zinc-500 border border-zinc-900 rounded-full tracking-wider uppercase font-sans shadow-sm">
-                    {msg.content}
-                  </span>
-                </div>
-              );
-            }
+
+            const isFirstUnread = initialUnreadCountRef.current > 0 &&
+              index === displayMessages.length - initialUnreadCountRef.current;
 
             return (
-              <div
-                key={msg.id}
-                className={`flex gap-2.5 group animate-in fade-in slide-in-from-bottom-2 duration-300 relative ${
-                  isMine ? "justify-end" : "justify-start"
-                }`}
-              >
-                {swipeOffset > 8 && (
+              <Fragment key={msg.id}>
+                {isFirstUnread && (
                   <div
-                    className={`absolute top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-[#00F0A0]/15 border border-[#00F0A0]/20 text-[#00F0A0] flex items-center justify-center ${
-                      isMine ? "right-2" : "left-12"
-                    }`}
+                    data-unread-separator="true"
+                    className="flex items-center gap-2.5 my-5 select-none animate-in fade-in duration-300 w-full"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="9 17 4 12 9 7" />
-                      <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
-                    </svg>
-                  </div>
-                )}
-
-                {/* Peer user avatar */}
-                {!isMine && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPeerProfile({
-                      id: msg.sender_id,
-                      nickname: msg.sender_nickname || "Anonymous Student",
-                      avatar_emoji: msg.sender_avatar || "👤",
-                    })}
-                    className="w-8 h-8 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800/80 hover:border-zinc-700 active:scale-95 duration-150 transition-all flex items-center justify-center text-base shadow-sm self-end mb-1 cursor-pointer select-none"
-                  >
-                    {msg.sender_avatar}
-                  </button>
-                )}
-
-                <div className={`flex flex-col gap-1 max-w-[75%] ${isMine ? "items-end" : "items-start"}`}>
-                  {/* Sender nickname on DMs/Groups */}
-                  {!isMine && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPeerProfile({
-                        id: msg.sender_id,
-                        nickname: msg.sender_nickname || "Anonymous Student",
-                        avatar_emoji: msg.sender_avatar || "👤",
-                      })}
-                      className="text-[10px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors ml-1 font-sans cursor-pointer text-left focus:outline-none"
-                    >
-                      {msg.sender_nickname}
-                    </button>
-                  )}
-
-                  {/* Message bubble */}
-                  <div
-                    onClick={() => handleMessageSelect(msg)}
-                    onPointerDown={(event) => handlePointerDown(event, msg)}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={() => handlePointerEnd(msg)}
-                    onPointerCancel={() => handlePointerEnd(msg)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setSelectedMessage(msg);
-                    }}
-                    style={{
-                      transform: `translateX(${swipeOffset}px)`,
-                    }}
-                    className={`p-3.5 rounded-2xl relative cursor-pointer transition-transform touch-pan-y select-none active:scale-[0.98] ${
-                      msg.type === "text" && isEmojiOnly(msg.content)
-                        ? "bg-transparent shadow-none border-none !p-1 text-white"
-                        : isMine
-                        ? "bg-[#00F0A0] text-black font-semibold rounded-tr-none shadow-md"
-                        : "bg-[#12121A] text-zinc-100 border border-zinc-900 rounded-tl-none shadow-md"
-                    }`}
-                  >
-                    {msg.is_forwarded && (
-                      <div className="flex items-center gap-1 mb-1.5 opacity-60">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="10"
-                          height="10"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className={isMine && !(msg.type === "text" && isEmojiOnly(msg.content)) ? "text-black" : "text-zinc-400"}
-                        >
-                          <polyline points="15 17 20 12 15 7" />
-                          <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
-                        </svg>
-                        <span className={`text-[9px] font-black uppercase tracking-wider ${isMine && !(msg.type === "text" && isEmojiOnly(msg.content)) ? "text-black/80" : "text-zinc-500"}`}>
-                          Forwarded
-                        </span>
-                      </div>
-                    )}
-
-                    {msg.reply_to_content && (
-                      <button
-                        type="button"
-                        onClick={(event) => event.stopPropagation()}
-                        className={`w-full text-left mb-2 rounded-xl border-l-2 px-2.5 py-2 ${
-                          isMine
-                            ? "bg-black/10 border-black/40 text-black/70"
-                            : "bg-black/20 border-[#00F0A0]/60 text-zinc-300"
-                        }`}
-                      >
-                        <span className="block text-[10px] font-black uppercase tracking-wider truncate">
-                          {msg.reply_to_sender_nickname || "Anonymous Student"}
-                        </span>
-                        <span className="block text-[11px] leading-snug truncate opacity-80">
-                          {msg.reply_to_content}
-                        </span>
-                      </button>
-                    )}
-
-                    {msg.type === "image" && msg.media_url ? (
-                      <div className="relative rounded-lg overflow-hidden max-w-full my-1 border border-zinc-850">
-                        <img
-                          src={msg.media_url}
-                          alt="Shared Media"
-                          className="max-h-[300px] object-contain w-full rounded-lg"
-                          loading="lazy"
-                        />
-                        {msg.content && msg.content !== "Photo" && (
-                          <p className="text-[14px] leading-relaxed break-words font-sans mt-2">
-                            {msg.content}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <p className={`leading-relaxed break-words font-sans ${
-                        msg.type === "text" && isEmojiOnly(msg.content)
-                          ? "text-[32px] md:text-[36px]"
-                          : "text-[14px]"
-                      }`}>
-                        {msg.content}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Reactions Display */}
-                  {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                    <div className="flex gap-1.5 mt-1 flex-wrap">
-                      {Object.entries(msg.reactions).map(([emoji, userIds]) => {
-                        if (!userIds || userIds.length === 0) return null;
-                        const userReacted = userIds.includes(currentUserId);
-                        return (
-                          <button
-                            key={emoji}
-                            onClick={() => toggleReaction(msg.id, emoji)}
-                            className={`flex items-center gap-1 rounded-full px-2 py-0.5 border text-[10px] font-bold shadow-sm transition-all duration-150 cursor-pointer ${
-                              userReacted
-                                ? "bg-[#00F0A0]/10 border-[#00F0A0]/30 text-[#00F0A0]"
-                                : "bg-[#12121A]/80 border-zinc-900 text-zinc-400 hover:border-zinc-800"
-                            }`}
-                          >
-                            <span>{emoji}</span>
-                            <span>{userIds.length}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Timestamp & read confirmation */}
-                  <div className="flex items-center gap-1 mt-0.5 px-1 select-none">
-                    <span className="text-[9px] text-zinc-600 font-sans tracking-wide">
-                      {new Date(msg.created_at).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                    <div className="flex-1 h-px bg-[#FF4B72]/20" />
+                    <span className="px-3.5 py-1 bg-[#FF4B72]/10 border border-[#FF4B72]/20 text-[9px] font-black text-[#FF4B72] rounded-full tracking-wider uppercase font-sans shadow-sm">
+                      New Messages
                     </span>
-                    {isMine && (
-                      <>
-                        {msg.delivery_status === "sending" && (
-                          <span className="text-[9px] text-zinc-600 font-sans">sending</span>
-                        )}
-                        {msg.delivery_status === "failed" && msg.client_message_id && (
-                          <button
-                            type="button"
-                            onClick={() => retryMessage(msg.client_message_id!)}
-                            className="text-[9px] text-[#FF4B72] font-bold font-sans cursor-pointer"
-                          >
-                            retry
-                          </button>
-                        )}
-                        {msg.delivery_status !== "sending" && msg.delivery_status !== "failed" && (
-                          <span className="text-[#00F0A0]">
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="3.2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                          </span>
-                        )}
-                      </>
-                    )}
+                    <div className="flex-1 h-px bg-[#FF4B72]/20" />
                   </div>
-                </div>
-              </div>
+                )}
+                <MessageBubble
+                  id={msg.id}
+                  content={msg.content}
+                  type={msg.type}
+                  mediaUrl={msg.media_url}
+                  createdAt={msg.created_at}
+                  formattedTime={msg.formatted_time}
+                  isMine={isMine}
+                  senderNickname={msg.sender_nickname}
+                  senderAvatar={msg.sender_avatar}
+                  reactions={msg.reactions}
+                  deliveryStatus={msg.delivery_status}
+                  clientMessageId={msg.client_message_id}
+                  swipeOffset={swipeOffset}
+                  replyToContent={msg.reply_to_content}
+                  replyToSender={msg.reply_to_sender_nickname}
+                  isForwarded={msg.is_forwarded || false}
+                  currentUserId={currentUserId}
+                  senderId={msg.sender_id}
+                  onPeerClick={handlePeerClick}
+                  onSelect={handleMessageSelect}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerEnd}
+                  onPointerCancel={handlePointerEnd}
+                  onContextMenu={handleContextMenu}
+                  onToggleReaction={toggleReaction}
+                  onRetryMessage={retryMessage}
+                  onImageLoad={handleImageLoad}
+                  onImageClick={handleImageClick}
+                  mediaMetadata={msg.media_metadata}
+                  isPinned={roomData.pinned_message_id === msg.id}
+                />
+              </Fragment>
             );
           })
         )}
@@ -1046,183 +1281,15 @@ export default function ChatRoomClient({
       </div>
 
       {/* Input Form Bar */}
-      <footer className="sticky bottom-0 left-0 right-0 p-4 bg-[#08080C]/90 backdrop-blur-xl border-t border-zinc-900/60 z-30">
-        {replyingTo && (
-          <div className="mb-3 rounded-2xl bg-[#12121A] border border-zinc-800 shadow-lg overflow-hidden">
-            <div className="flex items-stretch">
-              <div className="w-1 bg-[#00F0A0]" />
-              <div className="flex-1 min-w-0 px-3 py-2.5">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-[#00F0A0] truncate">
-                    Replying to {replyingTo.senderNickname}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setReplyingTo(null)}
-                    className="text-zinc-500 hover:text-white p-1 rounded-full active:scale-90 transition-all cursor-pointer"
-                    aria-label="Cancel reply"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
-                  </button>
-                </div>
-                <p className="text-xs text-zinc-400 truncate mt-1">
-                  {replyingTo.content}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showEmojiPicker && (
-          <div className="mb-3 bg-[#12121A]/95 border border-zinc-800 rounded-2xl shadow-xl p-3 z-45 animate-in slide-in-from-bottom-2 fade-in duration-150 backdrop-blur-xl">
-            <div className="flex justify-between items-center mb-2 px-1">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-sans">Popular Emojis</span>
-              <button
-                type="button"
-                onClick={() => setShowEmojiPicker(false)}
-                className="text-zinc-500 hover:text-white text-xs cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-            <div className="grid grid-cols-8 gap-2">
-              {POPULAR_EMOJIS.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  onClick={() => {
-                    setInputText((prev) => prev + emoji);
-                  }}
-                  className="h-9 rounded-lg hover:bg-zinc-800/80 active:scale-90 transition-all flex items-center justify-center text-xl cursor-pointer"
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <form onSubmit={handleSend} className="flex items-center gap-2.5 w-full">
-          {/* Media Attach button */}
-          <button
-            type="button"
-            onClick={handleFileUpload}
-            className="w-11 h-11 rounded-full bg-[#12121A] border border-zinc-850 hover:border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90 duration-200 cursor-pointer shadow-sm shrink-0"
-            title="Attach Image"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-
-          {/* Camera Capture button */}
-          <button
-            type="button"
-            onClick={handleCameraUpload}
-            className="w-11 h-11 rounded-full bg-[#12121A] border border-zinc-850 hover:border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90 duration-200 cursor-pointer shadow-sm shrink-0"
-            title="Take Photo"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-              <circle cx="12" cy="13" r="4" />
-            </svg>
-          </button>
-
-          {/* Text Input area */}
-          <div className="flex-1 bg-[#12121A]/70 border border-zinc-900 rounded-full flex items-center px-4 py-2 h-11 shadow-inner focus-within:border-zinc-850 transition-colors relative">
-            <input
-              type="text"
-              required
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              className="bg-transparent border-none text-white text-[14px] placeholder-zinc-650 w-full focus:ring-0 focus:outline-none font-sans pr-8"
-              placeholder={`Message in anonymous room...`}
-            />
-            {/* Emoji Trigger Button */}
-            <button
-              type="button"
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="absolute right-3.5 text-zinc-500 hover:text-white transition-colors cursor-pointer"
-              title="Emojis"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-                <line x1="9" y1="9" x2="9.01" y2="9" />
-                <line x1="15" y1="9" x2="15.01" y2="9" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Send FAB Button */}
-          <button
-            type="submit"
-            disabled={!inputText.trim()}
-            className="w-11 h-11 rounded-full bg-[#00F0A0] text-black flex items-center justify-center shadow-[0_4px_16px_rgba(0,240,160,0.3)] disabled:opacity-40 disabled:shadow-none hover:scale-105 active:scale-90 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed shrink-0"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
-        </form>
-        {/* Mobile gestures safe padding */}
-        <div className="h-2" />
-      </footer>
+      {/* Input Composer Bar */}
+      <MessageComposer
+        onSend={handleSendMessage}
+        onAttachImage={handleFileUpload}
+        onAttachCamera={handleCameraUpload}
+        setTypingStatus={setTypingStatus}
+        replyingTo={replyingTo}
+        onCancelReply={() => setReplyingTo(null)}
+      />
 
       {copyToast && (
         <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[70] px-3.5 py-2 rounded-full bg-white text-black text-xs font-bold shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-150">
@@ -1266,7 +1333,7 @@ export default function ChatRoomClient({
               ))}
             </div>
 
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => handleReplyToMessage(selectedMessage)}
@@ -1316,7 +1383,6 @@ export default function ChatRoomClient({
                 type="button"
                 onClick={() => {
                   setForwardingMessage(selectedMessage);
-                  setForwardedRoomIds(new Set());
                   setSelectedMessage(null);
                 }}
                 className="h-16 rounded-2xl bg-[#08080C] border border-zinc-900 text-zinc-200 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
@@ -1338,29 +1404,112 @@ export default function ChatRoomClient({
                 <span className="text-[10px] font-bold">Forward</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setReportingMessageId(selectedMessage.id);
-                  setSelectedMessage(null);
-                }}
-                className="h-16 rounded-2xl bg-[#08080C] border border-zinc-900 text-[#FF4B72] flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+              {/* Pin / Unpin Button */}
+              {selectedMessage.type !== "system" && (
+                <button
+                  type="button"
+                  data-testid="action-pin"
+                  onClick={async () => {
+                    const isPinned = roomData.pinned_message_id === selectedMessage.id;
+                    const nextPinnedId = isPinned ? null : selectedMessage.id;
+                    
+                    // Optimistic update
+                    setRoomData((prev) => ({ ...prev, pinned_message_id: nextPinnedId }));
+                    const local = await localDB.rooms.get(roomId);
+                    if (local) {
+                      await localDB.rooms.update(roomId, { pinned_message_id: nextPinnedId });
+                    }
+
+                    const res = await pinMessage(nextPinnedId);
+                    if (!res.success) {
+                      // Rollback on error
+                      setRoomData((prev) => ({ ...prev, pinned_message_id: local?.pinned_message_id || null }));
+                      if (local) {
+                        await localDB.rooms.update(roomId, { pinned_message_id: local.pinned_message_id || null });
+                      }
+                    }
+                    setSelectedMessage(null);
+                  }}
+                  className={`h-16 rounded-2xl border flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer ${
+                    roomData.pinned_message_id === selectedMessage.id
+                      ? "bg-amber-400/10 border-amber-400/30 text-amber-400"
+                      : "bg-[#08080C] border-zinc-900 text-zinc-200"
+                  }`}
                 >
-                  <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7" />
-                </svg>
-                <span className="text-[10px] font-bold">Report</span>
-              </button>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="12" y1="17" x2="12" y2="22" />
+                    <path d="M5 17h14v-1.76a2 2 0 0 0-.44-1.24l-2.78-3.5A2 2 0 0 1 15 9.26V5a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4.26a2 2 0 0 1-.78 1.24l-2.78 3.5a2 2 0 0 0-.44 1.24V17z" />
+                  </svg>
+                  <span className="text-[10px] font-bold">
+                    {roomData.pinned_message_id === selectedMessage.id ? "Unpin" : "Pin"}
+                  </span>
+                </button>
+              )}
+
+              {/* Delete / Report Button */}
+              {selectedIsMine ? (
+                <button
+                  type="button"
+                  data-testid="action-delete"
+                  onClick={async () => {
+                    await deleteMessage(selectedMessage.id);
+                    setSelectedMessage(null);
+                  }}
+                  className="h-16 rounded-2xl bg-[#FF4B72]/10 border border-[#FF4B72]/20 text-[#FF4B72] flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                  </svg>
+                  <span className="text-[10px] font-bold">Delete</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReportingMessageId(selectedMessage.id);
+                    setSelectedMessage(null);
+                  }}
+                  className="h-16 rounded-2xl bg-[#08080C] border border-zinc-900 text-[#FF4B72] flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7" />
+                  </svg>
+                  <span className="text-[10px] font-bold">Report</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1499,104 +1648,12 @@ export default function ChatRoomClient({
 
       {/* Forward Message Bottom Sheet / Modal */}
       {forwardingMessage && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/45 backdrop-blur-[2px] flex items-end justify-center"
-          onClick={() => {
-            setForwardingMessage(null);
-            setForwardedRoomIds(new Set());
-          }}
-        >
-          <div
-            className="w-full max-w-[480px] bg-[#12121A] border-t border-zinc-800 rounded-t-3xl shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in slide-in-from-bottom-4 fade-in duration-150"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="w-10 h-1 rounded-full bg-zinc-700 mx-auto mb-5 shrink-0" />
-
-            <div className="flex items-center justify-between mb-4 shrink-0">
-              <h3 className="text-base font-bold text-white tracking-tight">
-                Forward Message
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setForwardingMessage(null);
-                  setForwardedRoomIds(new Set());
-                }}
-                className="text-xs text-zinc-500 hover:text-white cursor-pointer"
-              >
-                Done
-              </button>
-            </div>
-
-            {/* Preview of forwarded content */}
-            <div className="p-3 bg-[#08080C] border border-zinc-900 rounded-xl mb-4 shrink-0 flex items-center gap-3">
-              {forwardingMessage.type === "image" && forwardingMessage.media_url ? (
-                <>
-                  <div className="w-10 h-10 rounded bg-zinc-900 border border-zinc-800 overflow-hidden shrink-0">
-                    <img src={forwardingMessage.media_url} alt="Preview" className="w-full h-full object-cover" />
-                  </div>
-                  <span className="text-xs text-zinc-400 font-sans italic truncate">Photo</span>
-                </>
-              ) : (
-                <p className="text-xs text-zinc-400 font-sans line-clamp-2 leading-relaxed">
-                  {forwardingMessage.content}
-                </p>
-              )}
-            </div>
-
-            {/* List of rooms */}
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-4">
-              {rooms.length === 0 ? (
-                <p className="text-xs text-zinc-500 text-center py-6 font-sans">No active chats found.</p>
-              ) : (
-                rooms.map((room) => {
-                  const isSent = forwardedRoomIds.has(room.id);
-                  const isSending = forwardingRoomId === room.id;
-
-                  return (
-                    <div
-                      key={room.id}
-                      className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-900/20 border border-zinc-950 hover:bg-zinc-900/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800 flex items-center justify-center text-lg select-none">
-                          {room.avatar_emoji}
-                        </div>
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold text-white truncate">{room.name}</span>
-                          <span className="text-[9px] text-zinc-500 uppercase tracking-wider font-sans font-black mt-0.5">
-                            {room.type === "group" ? "Group Chat" : "Private Chat"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        disabled={isSent || isSending}
-                        onClick={() => handleForwardSelect(room.id)}
-                        className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 cursor-pointer ${
-                          isSent
-                            ? "bg-zinc-800 text-zinc-500 border border-zinc-800 cursor-default"
-                            : isSending
-                            ? "bg-[#00F0A0]/10 border border-[#00F0A0]/20 text-[#00F0A0] cursor-default"
-                            : "bg-[#00F0A0] text-black hover:scale-105 active:scale-95 shadow-sm"
-                        }`}
-                      >
-                        {isSending ? (
-                          <div className="w-3 h-3 border-2 border-[#00F0A0] border-t-transparent rounded-full animate-spin mx-2" />
-                        ) : isSent ? (
-                          "Sent"
-                        ) : (
-                          "Send"
-                        )}
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
+        <ForwardMessageModal
+          forwardingMessage={forwardingMessage}
+          onClose={() => setForwardingMessage(null)}
+          currentUserId={currentUserId}
+          showToast={showToast}
+        />
       )}
 
       {/* Image Editor Overlay Modal */}
@@ -1660,6 +1717,160 @@ export default function ChatRoomClient({
           </div>
         </div>
       )}
+
+      {/* Expanded image viewer lightbox modal */}
+      <ImageViewerModal
+        isOpen={!!viewingImageUrl}
+        imageUrl={viewingImageUrl}
+        onClose={() => setViewingImageUrl(null)}
+      />
     </main>
+  );
+}
+
+interface ForwardMessageModalProps {
+  forwardingMessage: Message;
+  onClose: () => void;
+  currentUserId: string;
+  showToast: (msg: string, type?: "success" | "error" | "info") => void;
+}
+
+function ForwardMessageModal({
+  forwardingMessage,
+  onClose,
+  currentUserId,
+  showToast,
+}: ForwardMessageModalProps) {
+  // Scoped subscription: only active when modal is mounted!
+  const rooms = useInboxStore(useCallback((state: InboxState) => state.rooms, []));
+  const [forwardedRoomIds, setForwardedRoomIds] = useState<Set<string>>(new Set());
+  const [forwardingRoomId, setForwardingRoomId] = useState<string | null>(null);
+
+  const handleForwardSelect = async (targetRoomId: string) => {
+    setForwardingRoomId(targetRoomId);
+    try {
+      const supabase = createClient();
+      
+      const { error } = await supabase
+        .from("messages")
+        .insert({
+          room_id: targetRoomId,
+          sender_id: currentUserId,
+          content: forwardingMessage.content,
+          type: forwardingMessage.type,
+          media_url: forwardingMessage.media_url || null,
+          is_forwarded: true,
+        });
+
+      if (error) throw error;
+      
+      setForwardedRoomIds((prev) => {
+        const next = new Set(prev);
+        next.add(targetRoomId);
+        return next;
+      });
+      
+      showToast("Message forwarded", "success");
+    } catch (err: any) {
+      console.error("Failed to forward message:", err?.message || err?.details || err);
+      showToast("Failed to forward message", "error");
+    } finally {
+      setForwardingRoomId(null);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] bg-black/45 backdrop-blur-[2px] flex items-end justify-center"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[480px] bg-[#12121A] border-t border-zinc-800 rounded-t-3xl shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in slide-in-from-bottom-4 fade-in duration-150"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="w-10 h-1 rounded-full bg-zinc-700 mx-auto mb-5 shrink-0" />
+
+        <div className="flex items-center justify-between mb-4 shrink-0">
+          <h3 className="text-base font-bold text-white tracking-tight">
+            Forward Message
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-zinc-500 hover:text-white cursor-pointer"
+          >
+            Done
+          </button>
+        </div>
+
+        {/* Preview of forwarded content */}
+        <div className="p-3 bg-[#08080C] border border-zinc-900 rounded-xl mb-4 shrink-0 flex items-center gap-3">
+          {forwardingMessage.type === "image" && forwardingMessage.media_url ? (
+            <>
+              <div className="w-10 h-10 rounded bg-zinc-900 border border-zinc-800 overflow-hidden shrink-0">
+                <img src={forwardingMessage.media_url} alt="Preview" className="w-full h-full object-cover" />
+              </div>
+              <span className="text-xs text-zinc-400 font-sans italic truncate">Photo</span>
+            </>
+          ) : (
+            <p className="text-xs text-zinc-400 font-sans line-clamp-2 leading-relaxed">
+              {forwardingMessage.content}
+            </p>
+          )}
+        </div>
+
+        {/* List of rooms */}
+        <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-4">
+          {rooms.length === 0 ? (
+            <p className="text-xs text-zinc-500 text-center py-6 font-sans">No active chats found.</p>
+          ) : (
+            rooms.map((room) => {
+              const isSent = forwardedRoomIds.has(room.id);
+              const isSending = forwardingRoomId === room.id;
+
+              return (
+                <div
+                  key={room.id}
+                  className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-900/20 border border-zinc-950 hover:bg-zinc-900/50 transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800 flex items-center justify-center text-lg select-none">
+                      {room.avatar_emoji}
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-bold text-white truncate">{room.name}</span>
+                      <span className="text-[9px] text-zinc-500 uppercase tracking-wider font-sans font-black mt-0.5">
+                        {room.type === "group" ? "Group Chat" : "Private Chat"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isSent || isSending}
+                    onClick={() => handleForwardSelect(room.id)}
+                    className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 cursor-pointer ${
+                      isSent
+                        ? "bg-zinc-800 text-zinc-500 border border-zinc-800 cursor-default"
+                        : isSending
+                        ? "bg-[#00F0A0]/10 border border-[#00F0A0]/20 text-[#00F0A0] cursor-default"
+                        : "bg-[#00F0A0] text-black hover:scale-105 active:scale-95 shadow-sm"
+                    }`}
+                  >
+                    {isSending ? (
+                      <div className="w-3 h-3 border-2 border-[#00F0A0] border-t-transparent rounded-full animate-spin mx-2" />
+                    ) : isSent ? (
+                      "Sent"
+                    ) : (
+                      "Send"
+                    )}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

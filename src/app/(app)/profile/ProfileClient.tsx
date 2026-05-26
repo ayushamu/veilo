@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/common/BottomNav";
 import { signOut } from "@/app/actions/auth";
+import { useFcm } from "@/hooks/use-fcm";
 
 interface ProfileSummary {
   nickname: string;
@@ -22,6 +23,7 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const { permission, requestPermission, loading: fcmLoading } = useFcm();
 
   // Clear cache handler
   const handleClearCache = async () => {
@@ -305,6 +307,44 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
               <div className="space-y-0.5">
                 <p className="text-sm font-bold text-white">Install Veilo PWA</p>
                 <p className="text-xs text-zinc-500 font-sans">Open browser share settings and select "Add to Home Screen" to install</p>
+              </div>
+            </div>
+
+            {/* Push Notifications row */}
+            <div className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3.5">
+                <div className={`p-2.5 rounded-xl flex items-center justify-center transition-colors ${permission === "granted" ? "bg-[#00F0A0]/10 text-[#00F0A0]" : "bg-zinc-900/80 text-zinc-400"}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-white">Push Notifications</p>
+                  <p className="text-xs text-zinc-500 font-sans mt-0.5">
+                    {permission === "granted" 
+                      ? "Realtime DM push notifications enabled" 
+                      : permission === "denied"
+                      ? "Notification permission is blocked by browser"
+                      : "Receive push notifications when you get a DM"}
+                  </p>
+                </div>
+              </div>
+              <div>
+                {permission === "granted" ? (
+                  <span className="bg-[#00F0A0]/10 text-[#00F0A0] px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider">
+                    Enabled
+                  </span>
+                ) : permission === "denied" ? (
+                  <span className="bg-red-500/10 text-red-500 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider">
+                    Blocked
+                  </span>
+                ) : (
+                  <button
+                    onClick={requestPermission}
+                    disabled={fcmLoading}
+                    className="bg-[#00F0A0] text-black hover:bg-[#00d28d] font-bold px-3 py-1.5 rounded-lg text-xs transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 animate-pulse"
+                  >
+                    {fcmLoading ? "Enabling..." : "Enable"}
+                  </button>
+                )}
               </div>
             </div>
 

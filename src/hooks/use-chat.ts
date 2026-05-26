@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { localDB, type LocalMessage } from "@/lib/db/local-db";
+import { localDB, type LocalMessage, type MediaMetadata } from "@/lib/db/local-db";
 import { useChatHistoryStore } from "@/store/chat-history-store";
 import Dexie from "dexie";
+import { sendDmNotification } from "@/app/actions/push";
 
 const PAGE_SIZE = 30;
 
@@ -27,6 +28,8 @@ export interface Message {
   delivery_status?: "sending" | "sent" | "failed";
   error_message?: string;
   has_media?: number;
+  formatted_time?: string;
+  media_metadata?: MediaMetadata;
 }
 
 export type ReplyDraft = {
@@ -137,6 +140,17 @@ function shouldRetryWithoutClientMessageId(error: unknown) {
 
 
 
+function formatTime(createdAtStr: string): string {
+  try {
+    return new Date(createdAtStr).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
 function formatMessage(msg: RawMessage): Message {
   const rawProfiles = msg.profiles;
   const profile = Array.isArray(rawProfiles) ? rawProfiles[0] : rawProfiles;
@@ -158,15 +172,40 @@ function formatMessage(msg: RawMessage): Message {
     is_forwarded: msg.is_forwarded || false,
     delivery_status: "sent",
     reactions: {},
-    has_media: msg.type === "image" ? 1 : 0
+    has_media: msg.type === "image" ? 1 : 0,
+    formatted_time: formatTime(msg.created_at)
   };
 }
 
 const EMPTY_ARRAY: Message[] = [];
 
-export function useChat(roomId: string, currentUserId: string) {
+export function useChat(
+  roomId: string,
+  currentUserId: string,
+  options: { batchWindowMs: number } = { batchWindowMs: 100 }
+) {
   const supabase = useMemo(() => createClient(), []);
   console.log("useChat hook instantiated/rendered:", { roomId, currentUserId });
+  
+  // Updates Zustand and localDB synchronously using compound index to avoid CPU sorting
+  const syncLocalRoomMessages = useCallback(async () => {
+    console.log("syncLocalRoomMessages starting query in IndexedDB for room:", roomId);
+    const local = await localDB.messages
+      .where('[room_id+created_at]')
+      .between([roomId, Dexie.minKey], [roomId, Dexie.maxKey])
+      .reverse()
+      .limit(PAGE_SIZE)
+      .toArray();
+
+    const formatted = local.map(msg => ({
+      ...msg,
+      formatted_time: msg.formatted_time || formatTime(msg.created_at)
+    }));
+
+    console.log("syncLocalRoomMessages complete, found records:", formatted.length);
+    useChatHistoryStore.getState().setHotMessages(roomId, formatted);
+    return formatted;
+  }, [roomId]);
   
   // Connect hooks to Zustand transient cache slice
   const hotMessages = useChatHistoryStore((state) => state.hotCache[roomId] || EMPTY_ARRAY);
@@ -203,6 +242,35 @@ export function useChat(roomId: string, currentUserId: string) {
   const [hasMore, setHasMore] = useState(true);
   
   const channelRef = useRef<{ track: (payload: { typing: boolean }) => unknown } | null>(null);
+  const batchQueueRef = useRef<(() => Promise<void>)[]>([]);
+  const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  const queueDbTask = useCallback((task: () => Promise<void>) => {
+    if (options.batchWindowMs <= 0) {
+      task().then(() => syncLocalRoomMessages());
+      return;
+    }
+
+    batchQueueRef.current.push(task);
+
+    if (!batchTimerRef.current) {
+      batchTimerRef.current = setTimeout(async () => {
+        batchTimerRef.current = null;
+        const currentBatch = [...batchQueueRef.current];
+        batchQueueRef.current = [];
+
+        if (currentBatch.length === 0) return;
+
+        try {
+          await Promise.all(currentBatch.map(t => t()));
+          await syncLocalRoomMessages();
+        } catch (err) {
+          console.error("Error executing batched DB tasks:", err);
+        }
+      }, options.batchWindowMs);
+    }
+  }, [options.batchWindowMs, syncLocalRoomMessages]);
+
   const profileCacheRef = useRef<Map<string, { nickname: string; avatar_emoji: string }>>(
     new Map()
   );
@@ -242,22 +310,7 @@ export function useChat(roomId: string, currentUserId: string) {
     [supabase]
   );
 
-  // Updates Zustand and localDB synchronously
-  const syncLocalRoomMessages = useCallback(async () => {
-    console.log("syncLocalRoomMessages starting query in IndexedDB for room:", roomId);
-    const local = await localDB.messages
-      .where("room_id")
-      .equals(roomId)
-      .reverse()
-      .limit(PAGE_SIZE)
-      .toArray();
 
-    // Sort descending to keep newest first (compat with ChatRoomClient.reverse())
-    const sorted = local.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    console.log("syncLocalRoomMessages complete, found records:", sorted.length);
-    useChatHistoryStore.getState().setHotMessages(roomId, sorted);
-    return sorted;
-  }, [roomId]);
 
   // Delta Sync: Fetches and merges updates in the background
   const runBackgroundDeltaSync = useCallback(async (latestLocalTimestamp: string | null) => {
@@ -299,7 +352,8 @@ export function useChat(roomId: string, currentUserId: string) {
               reply_to_sender_nickname: msg.reply_to_sender_nickname,
               is_forwarded: msg.is_forwarded,
               has_media: msg.type === "image" ? 1 : 0,
-              reactions: msg.reactions
+              reactions: msg.reactions,
+              formatted_time: msg.formatted_time
             };
             await localDB.messages.put(mappedLocal);
           }
@@ -344,12 +398,14 @@ export function useChat(roomId: string, currentUserId: string) {
           .toArray();
 
         if (olderLocal.length > 0) {
-          // Sort descending (newest first)
-          const sortedOlder = olderLocal.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          const formattedOlder = olderLocal.map(msg => ({
+            ...msg,
+            formatted_time: msg.formatted_time || formatTime(msg.created_at)
+          }));
           
-          // Merge: currentHot (newest) first, then sortedOlder (older)
+          // Merge: currentHot (newest) first, then older (already sorted via index)
           const currentHot = useChatHistoryStore.getState().hotCache[roomId] || [];
-          useChatHistoryStore.getState().setHotMessages(roomId, [...currentHot, ...sortedOlder]);
+          useChatHistoryStore.getState().setHotMessages(roomId, [...currentHot, ...formattedOlder]);
           
           setLoadingOlder(false);
           setHasMore(olderLocal.length === PAGE_SIZE);
@@ -400,6 +456,9 @@ export function useChat(roomId: string, currentUserId: string) {
 
   useEffect(() => {
     console.log("useChat useEffect mounting channel subscription for room:", roomId);
+
+    // Track room access for LRU RAM caching
+    useChatHistoryStore.getState().recordAccess(roomId);
 
     const initialFetchTimer = setTimeout(() => {
       console.log("useChat initialFetchTimer firing");
@@ -463,28 +522,47 @@ export function useChat(roomId: string, currentUserId: string) {
             delivery_status: "sent",
           };
 
-          // Save new realtime insert message to IndexedDB
-          const mappedLocal: LocalMessage = {
-            id: formattedMsg.id,
-            room_id: formattedMsg.room_id,
-            sender_id: formattedMsg.sender_id,
-            sender_nickname: formattedMsg.sender_nickname || "Anonymous Student",
-            sender_avatar: formattedMsg.sender_avatar || "👤",
-            content: formattedMsg.content,
-            type: formattedMsg.type,
-            media_url: formattedMsg.media_url,
-            created_at: formattedMsg.created_at,
-            delivery_status: "sent",
-            reply_to_message_id: formattedMsg.reply_to_message_id,
-            reply_to_content: formattedMsg.reply_to_content,
-            reply_to_sender_nickname: formattedMsg.reply_to_sender_nickname,
-            is_forwarded: formattedMsg.is_forwarded,
-            has_media: formattedMsg.type === "image" ? 1 : 0,
-            reactions: {}
-          };
+          // Queue database write to batch it
+          queueDbTask(async () => {
+            const mappedLocal: LocalMessage = {
+              id: formattedMsg.id,
+              room_id: formattedMsg.room_id,
+              sender_id: formattedMsg.sender_id,
+              sender_nickname: formattedMsg.sender_nickname || "Anonymous Student",
+              sender_avatar: formattedMsg.sender_avatar || "👤",
+              content: formattedMsg.content,
+              type: formattedMsg.type,
+              media_url: formattedMsg.media_url,
+              created_at: formattedMsg.created_at,
+              delivery_status: "sent",
+              reply_to_message_id: formattedMsg.reply_to_message_id,
+              reply_to_content: formattedMsg.reply_to_content,
+              reply_to_sender_nickname: formattedMsg.reply_to_sender_nickname,
+              is_forwarded: formattedMsg.is_forwarded,
+              has_media: formattedMsg.type === "image" ? 1 : 0,
+              reactions: {},
+              formatted_time: formattedMsg.formatted_time
+            };
 
-          await localDB.messages.put(mappedLocal);
-          await syncLocalRoomMessages();
+            await localDB.messages.put(mappedLocal);
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "messages",
+          filter: `room_id=eq.${roomId}`,
+        },
+        async (payload: any) => {
+          const deletedMsg = payload.old as { id: string };
+          if (deletedMsg && deletedMsg.id) {
+            console.log("Realtime message delete received:", deletedMsg.id);
+            await localDB.messages.delete(deletedMsg.id);
+            await syncLocalRoomMessages();
+          }
         }
       )
       .on(
@@ -502,36 +580,37 @@ export function useChat(roomId: string, currentUserId: string) {
             return;
           }
 
-          const msg = await localDB.messages.get(reaction.message_id);
-          if (msg) {
-            const currentReactions = { ...(msg.reactions || {}) };
+          // Queue reactions updates to batch writes
+          queueDbTask(async () => {
+            const msg = await localDB.messages.get(reaction.message_id);
+            if (msg) {
+              const currentReactions = { ...(msg.reactions || {}) };
 
-            if (typedPayload.eventType === "INSERT") {
-              if (!currentReactions[reaction.emoji]) {
-                currentReactions[reaction.emoji] = [];
-              }
-              if (!currentReactions[reaction.emoji].includes(reaction.profile_id)) {
-                currentReactions[reaction.emoji].push(reaction.profile_id);
-              }
-              await localDB.messages.update(reaction.message_id, { reactions: currentReactions });
-              await syncLocalRoomMessages();
-            } else if (typedPayload.eventType === "DELETE") {
-              const { data } = await supabase
-                .from("message_reactions")
-                .select("profile_id, emoji")
-                .eq("message_id", reaction.message_id);
+              if (typedPayload.eventType === "INSERT") {
+                if (!currentReactions[reaction.emoji]) {
+                  currentReactions[reaction.emoji] = [];
+                }
+                if (!currentReactions[reaction.emoji].includes(reaction.profile_id)) {
+                  currentReactions[reaction.emoji].push(reaction.profile_id);
+                }
+                await localDB.messages.update(reaction.message_id, { reactions: currentReactions });
+              } else if (typedPayload.eventType === "DELETE") {
+                const { data } = await supabase
+                  .from("message_reactions")
+                  .select("profile_id, emoji")
+                  .eq("message_id", reaction.message_id);
 
-              const updatedMap: { [emoji: string]: string[] } = {};
-              if (data) {
-                (data as { profile_id: string; emoji: string }[]).forEach((r) => {
-                  if (!updatedMap[r.emoji]) updatedMap[r.emoji] = [];
-                  updatedMap[r.emoji].push(r.profile_id);
-                });
+                const updatedMap: { [emoji: string]: string[] } = {};
+                if (data) {
+                  (data as { profile_id: string; emoji: string }[]).forEach((r) => {
+                    if (!updatedMap[r.emoji]) updatedMap[r.emoji] = [];
+                    updatedMap[r.emoji].push(r.profile_id);
+                  });
+                }
+                await localDB.messages.update(reaction.message_id, { reactions: updatedMap });
               }
-              await localDB.messages.update(reaction.message_id, { reactions: updatedMap });
-              await syncLocalRoomMessages();
             }
-          }
+          });
         }
       )
       .on("presence", { event: "sync" }, async () => {
@@ -613,16 +692,17 @@ export function useChat(roomId: string, currentUserId: string) {
       lastTrackedTypingRef.current = null;
       clearTimeout(initialFetchTimer);
       if (readWriteTimerRef.current) clearTimeout(readWriteTimerRef.current);
+      if (batchTimerRef.current) clearTimeout(batchTimerRef.current);
       supabase.removeChannel(channel);
       
-      // Wipe volatile memory (coldHistory) on exit to release RAM
-      useChatHistoryStore.getState().clearColdHistory(roomId);
+      // Run LRU memory eviction instead of wiping memory instantly
+      useChatHistoryStore.getState().pruneCache();
     };
   }, [currentUserId, fetchMessages, roomId, supabase, syncLocalRoomMessages]);
 
   const loadMore = useCallback(async () => {
     if (!hasMore || loading || loadingOlder || messages.length === 0) return 0;
-    const oldest = messages[0]; // Messages sorted oldest first in display lists
+    const oldest = messages[messages.length - 1]; // Grabs the actual oldest message at the end of the descending array
     return fetchMessages({ created_at: oldest.created_at, id: oldest.id });
   }, [fetchMessages, hasMore, loading, loadingOlder, messages]);
 
@@ -661,7 +741,8 @@ export function useChat(roomId: string, currentUserId: string) {
           aspect_ratio: options.aspectRatio,
           blurhash: options.blurhash,
           upload_state: 'pending'
-        } : undefined
+        } : undefined,
+        formatted_time: formatTime(new Date().toISOString())
       };
 
       await localDB.messages.put(localOptimistic);
@@ -744,11 +825,18 @@ export function useChat(roomId: string, currentUserId: string) {
             blurhash: options.blurhash,
             upload_state: 'success',
             access_count: 0
-          } : undefined
+          } : undefined,
+          formatted_time: formatTime(data.created_at)
         };
 
         await localDB.messages.put(confirmedMessage);
         await syncLocalRoomMessages();
+
+        // Asynchronously dispatch outbound FCM DM push notification in the background
+        sendDmNotification({
+          roomId: data.room_id,
+          messageText: data.content,
+        }).catch((err) => console.error("Failed to trigger FCM push notification:", err));
       }
     },
     [currentUserId, roomId, supabase, syncLocalRoomMessages]
@@ -861,6 +949,39 @@ export function useChat(roomId: string, currentUserId: string) {
     };
   }, [runBackgroundDeltaSync, supabase.realtime, syncLocalRoomMessages]);
 
+  const deleteMessage = useCallback(
+    async (messageId: string) => {
+      // Optimistic delete
+      await localDB.messages.delete(messageId);
+      await syncLocalRoomMessages();
+
+      const { error } = await supabase
+        .from("messages")
+        .delete()
+        .eq("id", messageId);
+      if (error) {
+        console.error("Delete message error:", getErrorContext(error));
+        return { success: false, error };
+      }
+      return { success: true };
+    },
+    [supabase, syncLocalRoomMessages]
+  );
+
+  const pinMessage = useCallback(
+    async (messageId: string | null) => {
+      const { error } = await supabase
+        .from("rooms")
+        .update({ pinned_message_id: messageId })
+        .eq("id", roomId);
+      if (error) {
+        console.error("Pin message error:", getErrorContext(error));
+        return { success: false, error };
+      }
+      return { success: true };
+    },
+    [roomId, supabase]
+  );
 
   return {
     messages,
@@ -875,5 +996,7 @@ export function useChat(roomId: string, currentUserId: string) {
     toggleReaction,
     setTypingStatus,
     markRoomRead,
+    deleteMessage,
+    pinMessage,
   };
 }

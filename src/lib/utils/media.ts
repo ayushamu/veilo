@@ -1,16 +1,49 @@
 /**
  * Client-side utility for optimizing images before secure upload.
- * Natively strips all EXIF location, device, and timestamp metadata via Canvas drawing,
- * and compresses the binary asset into WebP format to save user bandwidth.
+ * Natively strips all EXIF location, device, and timestamp metadata,
+ * and compresses the binary asset into WebP format in a background worker.
  */
 export async function optimizeAndStripImage(file: File): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    // 1. If not an image, reject
-    if (!file.type.startsWith("image/")) {
-      reject(new Error("Selected file must be an image."));
-      return;
-    }
+  // 1. Verify file type
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Selected file must be an image.");
+  }
 
+  // 2. Offload to Web Worker if OffscreenCanvas is supported (standard in Modern/Android Chrome)
+  if (typeof window !== "undefined" && typeof window.OffscreenCanvas !== "undefined" && typeof Worker !== "undefined") {
+    return new Promise((resolve, reject) => {
+      try {
+        const worker = new Worker("/workers/image-worker.js");
+
+        worker.onmessage = (event) => {
+          const { success, blob, error } = event.data;
+          worker.terminate();
+          if (success && blob) {
+            resolve(blob);
+          } else {
+            reject(new Error(error || "Worker failed to compress image."));
+          }
+        };
+
+        worker.onerror = (err) => {
+          worker.terminate();
+          reject(err);
+        };
+
+        worker.postMessage({ file, quality: 0.80, maxDim: 1200 });
+      } catch (err) {
+        console.warn("Worker initialization failed, falling back to main thread:", err);
+        resolve(optimizeAndStripImageMainThread(file));
+      }
+    });
+  }
+
+  // 3. Fallback to main thread canvas drawing for older runtimes
+  return optimizeAndStripImageMainThread(file);
+}
+
+function optimizeAndStripImageMainThread(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -22,7 +55,6 @@ export async function optimizeAndStripImage(file: File): Promise<Blob> {
           return;
         }
 
-        // 2. Downscale if image exceeds full mobile HD dimensions (max 1200px)
         const maxDim = 1200;
         let width = img.width;
         let height = img.height;
@@ -39,12 +71,8 @@ export async function optimizeAndStripImage(file: File): Promise<Blob> {
 
         canvas.width = width;
         canvas.height = height;
-
-        // 3. Draw image onto offscreen canvas
-        // This drops all metadata headers (GPS tags, timestamp, device identifier) by mapping raw pixels only
         ctx.drawImage(img, 0, 0, width, height);
 
-        // 4. Compress to WebP binary blob (quality: 80%)
         canvas.toBlob(
           (blob) => {
             if (blob) {

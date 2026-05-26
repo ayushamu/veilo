@@ -1,14 +1,7 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useRef } from "react";
+import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import { useBackgroundCleanup } from "@/hooks/use-cleanup";
 
@@ -68,18 +61,6 @@ type RefreshOptions = {
   silent?: boolean;
 };
 
-type InboxContextValue = {
-  rooms: ChatRoom[];
-  loadingInitial: boolean;
-  refreshing: boolean;
-  lastSyncedAt: number | null;
-  currentUserId: string | null;
-  refreshInbox: (options?: RefreshOptions) => Promise<void>;
-  patchRoom: (roomId: string, partialRoomState: Partial<ChatRoom>) => void;
-};
-
-const InboxContext = createContext<InboxContextValue | null>(null);
-
 function formatTimestamp(value: string | null) {
   if (!value) return "New";
 
@@ -114,8 +95,6 @@ function mapInboxRow(row: InboxRow): ChatRoom {
   };
 }
 
-
-
 function sortRooms(rooms: ChatRoom[]) {
   return [...rooms].sort((a, b) => {
     const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
@@ -134,17 +113,6 @@ function readCache(): InboxCache {
     if (!raw) return { rooms: [], currentUserId: null, lastSyncedAt: null };
 
     const parsed = JSON.parse(raw) as InboxCache;
-    const isFresh =
-      parsed.lastSyncedAt !== null && Date.now() - parsed.lastSyncedAt < CACHE_TTL_MS;
-
-    if (!isFresh) {
-      return {
-        rooms: parsed.rooms || [],
-        currentUserId: parsed.currentUserId || null,
-        lastSyncedAt: parsed.lastSyncedAt || null,
-      };
-    }
-
     return {
       rooms: parsed.rooms || [],
       currentUserId: parsed.currentUserId || null,
@@ -165,126 +133,145 @@ function writeCache(cache: InboxCache) {
   }
 }
 
-export function InboxProvider({ children }: { children: React.ReactNode }) {
-  useBackgroundCleanup();
-  const supabase = useMemo(() => createClient(), []);
-  const [rooms, setRooms] = useState<ChatRoom[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
-  const [loadingInitial, setLoadingInitial] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const roomsRef = useRef<ChatRoom[]>([]);
+export interface InboxState {
+  rooms: ChatRoom[];
+  loadingInitial: boolean;
+  refreshing: boolean;
+  lastSyncedAt: number | null;
+  currentUserId: string | null;
+  
+  setRooms: (rooms: ChatRoom[]) => void;
+  setLoadingInitial: (loading: boolean) => void;
+  setRefreshing: (refreshing: boolean) => void;
+  setLastSyncedAt: (timestamp: number | null) => void;
+  setCurrentUserId: (userId: string | null) => void;
+  
+  initializeFromCache: () => void;
+  refreshInbox: (options?: RefreshOptions) => Promise<void>;
+  patchRoom: (roomId: string, partialRoomState: Partial<ChatRoom>) => void;
+}
 
-  const persistRooms = useCallback((nextRooms: ChatRoom[], userId: string | null) => {
-    const syncedAt = Date.now();
-    setRooms(nextRooms);
-    roomsRef.current = nextRooms;
-    setCurrentUserId(userId);
-    setLastSyncedAt(syncedAt);
-    writeCache({
-      rooms: nextRooms,
-      currentUserId: userId,
-      lastSyncedAt: syncedAt,
-    });
-  }, []);
+export const useInboxZustandStore = create<InboxState>((set, get) => {
+  const supabase = createClient();
 
-  const loadRoomsFromTables = useCallback(
-    async (userId: string): Promise<ChatRoom[]> => {
-      const { data: participantsData, error } = await supabase
-        .from("room_participants")
-        .select(
-          `
-            room_id,
-            last_read_at,
-            is_muted,
-            rooms (
-              id,
-              type,
-              name,
-              avatar_emoji
-            )
-          `
-        )
-        .eq("profile_id", userId);
+  const loadRoomsFromTables = async (userId: string): Promise<ChatRoom[]> => {
+    const { data: participantsData, error } = await supabase
+      .from("room_participants")
+      .select(
+        `
+          room_id,
+          last_read_at,
+          is_muted,
+          rooms (
+            id,
+            type,
+            name,
+            avatar_emoji
+          )
+        `
+      )
+      .eq("profile_id", userId);
 
-      if (error) throw error;
+    if (error) throw error;
 
-      const fallbackRooms = await Promise.all(
-        ((participantsData || []) as unknown as ParticipantRow[]).map(async (item) => {
-          const rawRoom = Array.isArray(item.rooms) ? item.rooms[0] : item.rooms;
-          if (!rawRoom) return null;
+    const fallbackRooms = await Promise.all(
+      ((participantsData || []) as unknown as ParticipantRow[]).map(async (item) => {
+        const rawRoom = Array.isArray(item.rooms) ? item.rooms[0] : item.rooms;
+        if (!rawRoom) return null;
 
-          let name = rawRoom.name || "Anonymous Chat";
-          let avatarEmoji = rawRoom.avatar_emoji || "💬";
+        let name = rawRoom.name || "Anonymous Chat";
+        let avatarEmoji = rawRoom.avatar_emoji || "💬";
 
-          if (rawRoom.type === "direct") {
-            const { data: peerData } = await supabase
-              .from("room_participants")
-              .select("profile_id")
-              .eq("room_id", rawRoom.id)
-              .neq("profile_id", userId)
-              .maybeSingle();
-
-            if (peerData?.profile_id) {
-              const { data: peerProfile } = await supabase
-                .from("profiles")
-                .select("nickname, avatar_emoji")
-                .eq("id", peerData.profile_id)
-                .maybeSingle();
-
-              if (peerProfile) {
-                name = peerProfile.nickname;
-                avatarEmoji = peerProfile.avatar_emoji;
-              }
-            }
-          }
-
-          const { data: latestMsg } = await supabase
-            .from("messages")
-            .select("content, type, created_at")
+        if (rawRoom.type === "direct") {
+          const { data: peerData } = await supabase
+            .from("room_participants")
+            .select("profile_id")
             .eq("room_id", rawRoom.id)
-            .order("created_at", { ascending: false })
-            .order("id", { ascending: false })
-            .limit(1)
+            .neq("profile_id", userId)
             .maybeSingle();
 
-          const { count } = await supabase
-            .from("messages")
-            .select("id", { count: "exact", head: true })
-            .eq("room_id", rawRoom.id)
-            .gt("created_at", item.last_read_at)
-            .neq("sender_id", userId);
+          if (peerData?.profile_id) {
+            const { data: peerProfile } = await supabase
+              .from("profiles")
+              .select("nickname, avatar_emoji")
+              .eq("id", peerData.profile_id)
+              .maybeSingle();
 
-          return {
-            id: rawRoom.id,
-            name,
-            avatar_emoji: avatarEmoji,
-            type: rawRoom.type,
-            lastMessage: latestMsg
-              ? latestMsg.type === "image"
-                ? "Photo"
-                : latestMsg.content
-              : "Tap to start chatting...",
-            timestamp: formatTimestamp(latestMsg?.created_at || null),
-            unreadCount: count || 0,
-            isMuted: item.is_muted,
-            lastMessageAt: latestMsg?.created_at || null,
-          };
-        })
-      );
+            if (peerProfile) {
+              name = peerProfile.nickname;
+              avatarEmoji = peerProfile.avatar_emoji;
+            }
+          }
+        }
 
-      return sortRooms(fallbackRooms.filter((room): room is ChatRoom => Boolean(room)));
+        const { data: latestMsg } = await supabase
+          .from("messages")
+          .select("content, type, created_at")
+          .eq("room_id", rawRoom.id)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const { count } = await supabase
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("room_id", rawRoom.id)
+          .gt("created_at", item.last_read_at)
+          .neq("sender_id", userId);
+
+        return {
+          id: rawRoom.id,
+          name,
+          avatar_emoji: avatarEmoji,
+          type: rawRoom.type,
+          lastMessage: latestMsg
+            ? latestMsg.type === "image"
+              ? "Photo"
+              : latestMsg.content
+            : "Tap to start chatting...",
+          timestamp: formatTimestamp(latestMsg?.created_at || null),
+          unreadCount: count || 0,
+          isMuted: item.is_muted,
+          lastMessageAt: latestMsg?.created_at || null,
+        };
+      })
+    );
+
+    return sortRooms(fallbackRooms.filter((room): room is ChatRoom => Boolean(room)));
+  };
+
+  return {
+    rooms: [],
+    loadingInitial: true,
+    refreshing: false,
+    lastSyncedAt: null,
+    currentUserId: null,
+
+    setRooms: (rooms) => set({ rooms }),
+    setLoadingInitial: (loadingInitial) => set({ loadingInitial }),
+    setRefreshing: (refreshing) => set({ refreshing }),
+    setLastSyncedAt: (lastSyncedAt) => set({ lastSyncedAt }),
+    setCurrentUserId: (currentUserId) => set({ currentUserId }),
+
+    initializeFromCache: () => {
+      const cached = readCache();
+      if (cached.rooms.length > 0) {
+        set({
+          rooms: cached.rooms,
+          currentUserId: cached.currentUserId,
+          lastSyncedAt: cached.lastSyncedAt,
+          loadingInitial: false,
+        });
+      }
     },
-    [supabase]
-  );
 
-  const refreshInbox = useCallback(
-    async (options: RefreshOptions = {}) => {
-      const shouldBlock = !options.silent && rooms.length === 0;
+    refreshInbox: async (options = {}) => {
+      const state = get();
+      const shouldBlock = !options.silent && state.rooms.length === 0;
 
-      if (shouldBlock) setLoadingInitial(true);
-      setRefreshing(true);
+      if (shouldBlock) set({ loadingInitial: true });
+      set({ refreshing: true });
 
       try {
         const {
@@ -292,87 +279,99 @@ export function InboxProvider({ children }: { children: React.ReactNode }) {
         } = await supabase.auth.getUser();
 
         if (!user) {
-          persistRooms([], null);
+          set({
+            rooms: [],
+            currentUserId: null,
+            lastSyncedAt: Date.now(),
+            loadingInitial: false,
+            refreshing: false,
+          });
+          writeCache({ rooms: [], currentUserId: null, lastSyncedAt: Date.now() });
           return;
         }
-
-        setCurrentUserId(user.id);
 
         const { data, error } = await supabase.rpc("get_chat_inbox");
         const fetchedRooms = error
           ? await loadRoomsFromTables(user.id)
           : ((data || []) as InboxRow[]).map(mapInboxRow);
 
-        persistRooms(fetchedRooms, user.id);
+        const syncedAt = Date.now();
+        set({
+          rooms: fetchedRooms,
+          currentUserId: user.id,
+          lastSyncedAt: syncedAt,
+          loadingInitial: false,
+          refreshing: false,
+        });
+        writeCache({
+          rooms: fetchedRooms,
+          currentUserId: user.id,
+          lastSyncedAt: syncedAt,
+        });
       } catch (err) {
         console.error("Error refreshing chat inbox:", err);
-      } finally {
-        setLoadingInitial(false);
-        setRefreshing(false);
+        set({ refreshing: false, loadingInitial: false });
       }
     },
-    [loadRoomsFromTables, persistRooms, rooms.length, supabase]
-  );
 
-  const patchRoom = useCallback(
-    (roomId: string, partialRoomState: Partial<ChatRoom>) => {
-      setRooms((currentRooms) => {
-        const nextRooms = currentRooms.map((room) =>
-          room.id === roomId
-            ? {
-                ...room,
-                ...partialRoomState,
-                timestamp:
-                  partialRoomState.lastMessageAt !== undefined
-                    ? formatTimestamp(partialRoomState.lastMessageAt)
-                    : partialRoomState.timestamp || room.timestamp,
-              }
-            : room
-        );
+    patchRoom: (roomId, partialRoomState) => {
+      const state = get();
+      const nextRooms = state.rooms.map((room) =>
+        room.id === roomId
+          ? {
+              ...room,
+              ...partialRoomState,
+              timestamp:
+                partialRoomState.lastMessageAt !== undefined
+                  ? formatTimestamp(partialRoomState.lastMessageAt)
+                  : partialRoomState.timestamp || room.timestamp,
+            }
+          : room
+      );
 
-        const sortedRooms = sortRooms(nextRooms);
-        roomsRef.current = sortedRooms;
-        writeCache({
-          rooms: sortedRooms,
-          currentUserId,
-          lastSyncedAt,
-        });
-        return sortedRooms;
+      const sortedRooms = sortRooms(nextRooms);
+      set({ rooms: sortedRooms });
+      writeCache({
+        rooms: sortedRooms,
+        currentUserId: state.currentUserId,
+        lastSyncedAt: state.lastSyncedAt,
       });
     },
-    [currentUserId, lastSyncedAt]
-  );
+  };
+});
 
-  const scheduleRefresh = useCallback(() => {
-    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    refreshTimerRef.current = setTimeout(() => {
-      refreshInbox({ silent: true });
-    }, 250);
-  }, [refreshInbox]);
+export function InboxProvider({ children }: { children: React.ReactNode }) {
+  useBackgroundCleanup();
+  
+  const currentUserId = useInboxZustandStore((state) => state.currentUserId);
+  const initializeFromCache = useInboxZustandStore((state) => state.initializeFromCache);
+  const refreshInbox = useInboxZustandStore((state) => state.refreshInbox);
 
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Setup initial state from cache
   useEffect(() => {
-    const cachedInbox = readCache();
-    if (cachedInbox.rooms.length > 0) {
-      roomsRef.current = cachedInbox.rooms;
-      queueMicrotask(() => {
-        setRooms(cachedInbox.rooms);
-        setCurrentUserId(cachedInbox.currentUserId);
-        setLastSyncedAt(cachedInbox.lastSyncedAt);
-        setLoadingInitial(false);
-      });
-    }
-
+    initializeFromCache();
+    
     const timer = setTimeout(() => {
-      refreshInbox({ silent: roomsRef.current.length > 0 });
+      refreshInbox({ silent: true });
     }, 0);
 
     return () => clearTimeout(timer);
-    // Run only once on provider mount. Realtime handles later refreshes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initializeFromCache, refreshInbox]);
 
+  // Handle Supabase Realtime channel subscriptions
   useEffect(() => {
     if (!currentUserId) return;
+
+    const supabase = createClient();
+
+    const scheduleRefresh = () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(() => {
+        refreshInbox({ silent: true });
+      }, 250);
+    };
 
     const channel = supabase
       .channel(`chat-inbox:${currentUserId}`)
@@ -401,37 +400,18 @@ export function InboxProvider({ children }: { children: React.ReactNode }) {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       supabase.removeChannel(channel);
     };
-  }, [currentUserId, scheduleRefresh, supabase]);
+  }, [currentUserId, refreshInbox]);
 
-  const value = useMemo(
-    () => ({
-      rooms,
-      loadingInitial,
-      refreshing,
-      lastSyncedAt,
-      currentUserId,
-      refreshInbox,
-      patchRoom,
-    }),
-    [
-      rooms,
-      loadingInitial,
-      refreshing,
-      lastSyncedAt,
-      currentUserId,
-      refreshInbox,
-      patchRoom,
-    ]
-  );
-
-  return <InboxContext.Provider value={value}>{children}</InboxContext.Provider>;
+  return <>{children}</>;
 }
 
-export function useInboxStore() {
-  const context = useContext(InboxContext);
-  if (!context) {
-    throw new Error("useInboxStore must be used inside InboxProvider.");
+// Selector hook wrapper to maintain backward compatibility
+export function useInboxStore<T = InboxState>(
+  selector?: (state: InboxState) => T
+): T {
+  const store = useInboxZustandStore;
+  if (selector) {
+    return store(selector);
   }
-
-  return context;
+  return store() as unknown as T;
 }

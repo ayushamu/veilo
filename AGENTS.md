@@ -80,7 +80,50 @@ export default async function ChatRoomPage({ params }: PageProps) {
 
 ---
 
-## 6. Helpful Commands
+## 6. Performance Engineering & Gesture Invariants
+
+When extending or maintaining interactive elements in Veilo, always adhere to the following mobile-first optimizations:
+
+### ⚡ GPU-Accelerated Gestures (Tinder Deck Swiping)
+To achieve buttery-smooth 60fps drag physics on low-end Android Chrome devices:
+* **The Rule**: Do NOT update React state (e.g. `useState`) during pointer movement (`onPointerMove`). State updates trigger full virtual DOM diffing on every frame, causing visual lag.
+* **The Pattern**: Store drag coordinates in React refs (`useRef`) and mutate the DOM inline directly:
+  ```typescript
+  topCard.style.transform = `translate3d(${deltaX}px, ${deltaY}px, 0) rotate(${deltaX * 0.08}deg)`;
+  ```
+* **Infinite Looping Fallback**: Swiped card lists should be recycled client-side by shifting the swiped card to the end of the queue. On the server side, if `get_unseen_confessions` RPC returns 0 rows, the server action `getNextConfessions` automatically falls back to fetching already seen confessions (excluding the user's own) to ensure the campus feed never appears dead.
+
+### ⚓ Synchronous DOM Scroll Anchoring (Pagination Jitter Prevention)
+When prepending older chat messages to the top of a scroll container, adjusting scroll offsets asynchronously (e.g. in promises or timeouts) causes layout jumping because the browser repaints before the scroll position is updated.
+* **The Pattern**: Save the stable previous `scrollHeight` and `scrollTop` in refs *just before* calling `loadMore()`.
+* **The Update Hook**: Use `useLayoutEffect` (aliased to fallback to `useEffect` during SSR) to measure height changes and adjust `scrollTop` synchronously *after* DOM updates but *before* browser paint:
+  ```typescript
+  const useLayoutEffect = typeof window !== "undefined" ? reactUseLayoutEffect : useEffect;
+  
+  useLayoutEffect(() => {
+    if (lastScrollHeightRef.current > 0) {
+      const heightDiff = container.scrollHeight - lastScrollHeightRef.current;
+      if (heightDiff > 0) {
+        container.scrollTop = lastScrollTopRef.current + heightDiff;
+      }
+    }
+  }, [messages]);
+  ```
+
+### 🧭 Pagination Cursor Direction
+* **Sort Invariant**: The Hook `useChat` returns messages sorted **newest first** (`messages[0]` is the newest/bottom message). 
+* **The Rule**: When paginating to fetch older messages, the query offset cursor MUST point to the oldest message in the array:
+  ```typescript
+  const oldest = messages[messages.length - 1]; // Correct oldest pointer
+  ```
+
+### 💬 Clickable Campus Entry System Messages
+* Welcome messages sent by the auto-join database trigger use `type: 'system'` but register `sender_id` pointing to the new user.
+* **The Pattern**: In `MessageBubble.tsx`, system messages that have a valid `senderId` (not matching `currentUserId`) and resolved details render as interactive `<button>` elements. Tapping them triggers `onPeerClick` to open the profile details card directly from the chat feed, facilitating immediate direct message responses.
+
+---
+
+## 7. Helpful Commands
 
 ### Run Development Server
 ```bash

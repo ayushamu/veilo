@@ -4,10 +4,49 @@ import { useState } from "react";
 import Link from "next/link";
 import BottomNav from "@/components/common/BottomNav";
 import { useInboxStore } from "@/hooks/use-inbox-store";
+import { useChatHistoryStore } from "@/store/chat-history-store";
 
 export default function ChatsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const { rooms, loadingInitial, refreshing } = useInboxStore();
+
+  const handleRoomPointerDown = (roomId: string, event: React.PointerEvent) => {
+    if (typeof window !== "undefined" && window.performance) {
+      try {
+        performance.clearMarks("veilo-pointerdown");
+        performance.clearMeasures("veilo-tap-to-content");
+        performance.mark("veilo-pointerdown");
+      } catch (e) {}
+    }
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let isCancelled = false;
+
+    const timer = setTimeout(() => {
+      if (!isCancelled) {
+        useChatHistoryStore.getState().prewarmRoom(roomId);
+      }
+    }, 70);
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (Math.abs(e.clientX - startX) > 6 || Math.abs(e.clientY - startY) > 6) {
+        cleanup();
+      }
+    };
+
+    const cleanup = () => {
+      isCancelled = true;
+      clearTimeout(timer);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("pointerup", cleanup, { passive: true });
+    window.addEventListener("pointercancel", cleanup, { passive: true });
+  };
 
   const filteredRooms = rooms.filter((room) =>
     room.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -118,7 +157,10 @@ export default function ChatsPage() {
             <Link
               key={room.id}
               href={`/chats/${room.id}`}
+              onPointerDown={(e) => handleRoomPointerDown(room.id, e)}
               className="flex items-center justify-between p-3.5 hover:bg-[#12121A]/30 active:bg-[#12121A]/50 transition-colors duration-150 rounded-2xl cursor-pointer mt-1"
+              data-testid="room-item"
+              data-roomid={room.id}
             >
               <div className="flex items-center gap-3.5 flex-1 min-w-0">
                 <div className="w-12 h-12 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800/80 flex items-center justify-center text-2xl shadow-sm relative select-none">

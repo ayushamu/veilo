@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
 
 const WhitelistedDomains = ["@myamu.ac.in", "@amu.ac.in"];
 
@@ -106,6 +107,20 @@ export async function verifyOTP(
       .eq("id", data.user.id)
       .single();
 
+    let status = "onboarding";
+    if (profile && !profileError) {
+      status = profile.status;
+    }
+
+    // Set client status cookie for middleware acceleration (30 days)
+    const cookieStore = await cookies();
+    cookieStore.set("veilo-profile-status", status, {
+      path: "/",
+      maxAge: 30 * 24 * 60 * 60,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
+
     if (profileError || !profile) {
       console.error("Profile lookup error after verify:", profileError);
       return {
@@ -138,6 +153,11 @@ export async function signOut(): Promise<ActionResponse> {
     if (error) {
       return { success: false, message: error.message };
     }
+    
+    // Clear client status cookie
+    const cookieStore = await cookies();
+    cookieStore.delete("veilo-profile-status");
+    
     return { success: true };
   } catch (err) {
     console.error("Sign out server error:", err);

@@ -10,6 +10,7 @@ export interface LocalRoom {
   last_opened_at: number; // For LRU eviction tracking
   unread_count: number;
   is_muted: number;
+  pinned_message_id?: string | null;
 }
 
 export interface MediaMetadata {
@@ -40,6 +41,7 @@ export interface LocalMessage {
   has_media: number; // 0 or 1
   media_metadata?: MediaMetadata;
   reactions?: { [emoji: string]: string[] }; // Store nested reactions map in local IndexedDB document
+  formatted_time?: string;
 }
 
 export class VeiloLocalDB extends Dexie {

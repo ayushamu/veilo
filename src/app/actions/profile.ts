@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
 import { ActionResponse } from "./auth";
 
 /**
@@ -115,6 +116,15 @@ export async function submitOnboarding(
         message: updateError.message || "Failed to complete onboarding. Please try again.",
       };
     }
+
+    // Set client status cookie for middleware acceleration (30 days)
+    const cookieStore = await cookies();
+    cookieStore.set("veilo-profile-status", "active", {
+      path: "/",
+      maxAge: 30 * 24 * 60 * 60,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
 
     return {
       success: true,
