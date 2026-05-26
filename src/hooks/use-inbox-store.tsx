@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useBackgroundCleanup } from "@/hooks/use-cleanup";
 
 const CACHE_KEY = "veilo:chat-inbox:v1";
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -113,51 +114,7 @@ function mapInboxRow(row: InboxRow): ChatRoom {
   };
 }
 
-function getMockRooms(): ChatRoom[] {
-  return [
-    {
-      id: "00000000-0000-0000-0000-000000000000",
-      name: "Global AMU Chat",
-      avatar_emoji: "🎓",
-      type: "group",
-      lastMessage: "Welcome to Veilo! Tap to talk with Aligarh students.",
-      timestamp: "Live",
-      unreadCount: 0,
-      isMuted: false,
-      lastMessageAt: null,
-    },
-    {
-      id: "mock-dm-techiegeek",
-      name: "TechieGeek",
-      avatar_emoji: "🤖",
-      type: "direct",
-      lastMessage: "Anyone know if the library cafeteria is serving biryani?",
-      timestamp: "12:30 PM",
-      unreadCount: 1,
-      isMuted: false,
-      lastMessageAt: null,
-    },
-    {
-      id: "mock-dm-ecowarrior",
-      name: "EcoWarrior",
-      avatar_emoji: "🌱",
-      type: "direct",
-      lastMessage: "Just grabbed this! The queue is huge but totally worth it.",
-      timestamp: "12:32 PM",
-      unreadCount: 0,
-      isMuted: false,
-      lastMessageAt: null,
-    },
-  ];
-}
 
-function mergeWithMockRooms(fetchedRooms: ChatRoom[]) {
-  const activeIds = new Set(fetchedRooms.map((room) => room.id));
-  return [
-    ...fetchedRooms,
-    ...getMockRooms().filter((room) => !activeIds.has(room.id)),
-  ];
-}
 
 function sortRooms(rooms: ChatRoom[]) {
   return [...rooms].sort((a, b) => {
@@ -209,6 +166,7 @@ function writeCache(cache: InboxCache) {
 }
 
 export function InboxProvider({ children }: { children: React.ReactNode }) {
+  useBackgroundCleanup();
   const supabase = useMemo(() => createClient(), []);
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -345,7 +303,7 @@ export function InboxProvider({ children }: { children: React.ReactNode }) {
           ? await loadRoomsFromTables(user.id)
           : ((data || []) as InboxRow[]).map(mapInboxRow);
 
-        persistRooms(mergeWithMockRooms(fetchedRooms), user.id);
+        persistRooms(fetchedRooms, user.id);
       } catch (err) {
         console.error("Error refreshing chat inbox:", err);
       } finally {
@@ -441,7 +399,7 @@ export function InboxProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-      channel.unsubscribe();
+      supabase.removeChannel(channel);
     };
   }, [currentUserId, scheduleRefresh, supabase]);
 

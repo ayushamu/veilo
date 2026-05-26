@@ -9,6 +9,7 @@ import { useInboxStore } from "@/hooks/use-inbox-store";
 import ImageEditorModal from "@/components/common/ImageEditorModal";
 import { optimizeAndStripImage } from "@/lib/utils/media";
 import { getPresignedUploadUrl } from "@/app/actions/media";
+import { resolveDirectMessageRoom } from "@/app/actions/chats";
 
 interface ChatRoomClientProps {
   roomId: string;
@@ -60,6 +61,8 @@ export default function ChatRoomClient({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedPeerProfile, setSelectedPeerProfile] = useState<{ id: string; nickname: string; avatar_emoji: string } | null>(null);
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -67,6 +70,20 @@ export default function ChatRoomClient({
   const initialScrollDoneRef = useRef(false);
   const previousNewestMessageIdRef = useRef<string | null>(null);
   const suppressNextClickRef = useRef(false);
+
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = useCallback((message: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ message, type });
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => {
+      setToast(null);
+    }, 4000); // Show toast for 4 seconds
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const {
     messages,
@@ -98,10 +115,7 @@ export default function ChatRoomClient({
     messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
   }, []);
 
-  // Load mute state from the user's participant row.
   useEffect(() => {
-    if (roomId.startsWith("mock-")) return;
-
     const loadRoomState = async () => {
       const supabase = createClient();
       const { data } = await supabase
@@ -220,10 +234,19 @@ export default function ChatRoomClient({
     setTypingStatus(true);
     const delayDebounceFn = setTimeout(() => {
       setTypingStatus(false);
-    }, 3000);
+    }, 1500); // 1.5s responsive typing debounce
 
     return () => clearTimeout(delayDebounceFn);
   }, [inputText, setTypingStatus]);
+
+  // Scroll to bottom when someone starts typing to reveal the typing bubbles
+  useEffect(() => {
+    if (typingUsers.length > 0 && isNearBottom()) {
+      requestAnimationFrame(() => {
+        scrollToBottom("smooth");
+      });
+    }
+  }, [typingUsers.length, isNearBottom, scrollToBottom]);
 
   // Handle message send
   const handleSend = (e: React.FormEvent) => {
@@ -356,11 +379,30 @@ export default function ChatRoomClient({
           blocker_id: currentUserId,
           blocked_id: peer.profile_id,
         });
-        alert("Peer user has been blocked. Conversation will be locked.");
+        showToast("Peer user has been blocked. Conversation will be locked.", "info");
         router.push("/chats");
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleStartPrivateChat = async () => {
+    if (!selectedPeerProfile) return;
+    setIsCreatingChat(true);
+    try {
+      const res = await resolveDirectMessageRoom(selectedPeerProfile.id);
+      if (res.success && res.data) {
+        setSelectedPeerProfile(null);
+        router.push(`/chats/${res.data}`);
+      } else {
+        showToast(res.message || "Chat unavailable", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Chat unavailable", "error");
+    } finally {
+      setIsCreatingChat(false);
     }
   };
 
@@ -369,8 +411,6 @@ export default function ChatRoomClient({
     setIsMuted(nextMuted);
     patchRoom(roomId, { isMuted: nextMuted });
     setShowOptions(false);
-
-    if (roomId.startsWith("mock-")) return;
 
     const supabase = createClient();
     const { error } = await supabase
@@ -383,7 +423,7 @@ export default function ChatRoomClient({
       setIsMuted(!nextMuted);
       patchRoom(roomId, { isMuted: !nextMuted });
       console.error("Failed to update mute state:", error);
-      alert("Could not update mute state. Please try again.");
+      showToast("Could not update mute state. Please try again.", "error");
     }
   };
 
@@ -466,12 +506,12 @@ export default function ChatRoomClient({
           setIsUploading(false);
         };
         reader.onerror = () => {
-          alert("Failed to process image fallback.");
+          showToast("Failed to process image fallback.", "error");
           setIsUploading(false);
         };
         reader.readAsDataURL(optimizedBlob);
       } else {
-        alert("Failed to securely share image. Please try again.");
+        showToast("Failed to securely share image. Please try again.", "error");
         setIsUploading(false);
       }
     }
@@ -485,9 +525,9 @@ export default function ChatRoomClient({
     try {
       const res = await submitSafetyReport(reportingMessageId, reportReason.trim(), roomId);
       if (res.success) {
-        alert("Report submitted anonymously. Administrators will review the transcript.");
+        showToast("Report submitted anonymously. Administrators will review the transcript.", "success");
       } else {
-        alert(res.message || "Failed to submit report. Please try again.");
+        showToast(res.message || "Failed to submit report. Please try again.", "error");
       }
     } catch (err) {
       console.error(err);
@@ -659,24 +699,7 @@ export default function ChatRoomClient({
           </div>
         )}
 
-        {/* Dynamic Typing indicator bubble inside feed */}
-        {typingUsers.size > 0 && (
-          <div className="flex gap-3 animate-pulse">
-            <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-sm shadow-sm select-none">
-              💬
-            </div>
-            <div className="flex flex-col gap-1 max-w-[80%]">
-              <span className="text-[10px] font-bold text-zinc-500 font-sans tracking-wide ml-1">
-                Someone is typing
-              </span>
-              <div className="bg-[#12121A] border border-zinc-900 p-2.5 rounded-2xl rounded-tl-none text-xs text-zinc-400 font-sans italic flex items-center gap-1 select-none">
-                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-75" />
-                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-150" />
-                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-300" />
-              </div>
-            </div>
-          </div>
-        )}
+
 
         {/* Messages Loop */}
         {loading ? (
@@ -738,17 +761,33 @@ export default function ChatRoomClient({
 
                 {/* Peer user avatar */}
                 {!isMine && (
-                  <div className="w-8 h-8 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800/80 flex items-center justify-center text-base shadow-sm self-end mb-1 select-none">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPeerProfile({
+                      id: msg.sender_id,
+                      nickname: msg.sender_nickname || "Anonymous Student",
+                      avatar_emoji: msg.sender_avatar || "👤",
+                    })}
+                    className="w-8 h-8 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800/80 hover:border-zinc-700 active:scale-95 duration-150 transition-all flex items-center justify-center text-base shadow-sm self-end mb-1 cursor-pointer select-none"
+                  >
                     {msg.sender_avatar}
-                  </div>
+                  </button>
                 )}
 
                 <div className={`flex flex-col gap-1 max-w-[75%] ${isMine ? "items-end" : "items-start"}`}>
                   {/* Sender nickname on DMs/Groups */}
                   {!isMine && (
-                    <span className="text-[10px] font-bold text-zinc-400 ml-1 font-sans">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPeerProfile({
+                        id: msg.sender_id,
+                        nickname: msg.sender_nickname || "Anonymous Student",
+                        avatar_emoji: msg.sender_avatar || "👤",
+                      })}
+                      className="text-[10px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors ml-1 font-sans cursor-pointer text-left focus:outline-none"
+                    >
                       {msg.sender_nickname}
-                    </span>
+                    </button>
                   )}
 
                   {/* Message bubble */}
@@ -882,6 +921,25 @@ export default function ChatRoomClient({
             );
           })
         )}
+
+        {/* Dynamic Typing indicator bubbles inside feed */}
+        {typingUsers.map((user) => (
+          <div key={user.id} className="flex gap-3 animate-pulse mt-2 select-none justify-start">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800/80 flex items-center justify-center text-sm shadow-sm select-none">
+              {user.avatar_emoji}
+            </div>
+            <div className="flex flex-col gap-1 max-w-[80%]">
+              <span className="text-[10px] font-bold text-zinc-400 ml-1 font-sans">
+                {user.nickname}
+              </span>
+              <div className="bg-[#12121A] border border-zinc-900 p-2.5 rounded-2xl rounded-tl-none text-xs text-zinc-400 font-sans italic flex items-center gap-1 select-none w-max">
+                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-75" />
+                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-150" />
+                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce delay-300" />
+              </div>
+            </div>
+          </div>
+        ))}
 
         <div ref={messagesEndRef} />
 
@@ -1119,6 +1177,74 @@ export default function ChatRoomClient({
         </div>
       )}
 
+      {/* Peer Profile Bottom Sheet */}
+      {selectedPeerProfile && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/45 backdrop-blur-[2px] flex items-end justify-center"
+          onClick={() => setSelectedPeerProfile(null)}
+        >
+          <div
+            className="w-full max-w-[480px] bg-[#12121A] border-t border-zinc-800 rounded-t-3xl shadow-2xl p-6 animate-in slide-in-from-bottom-4 fade-in duration-150"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-zinc-700 mx-auto mb-6" />
+
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 border-2 border-zinc-700/80 flex items-center justify-center text-4xl shadow-md mb-3 select-none">
+                {selectedPeerProfile.avatar_emoji}
+              </div>
+              <h3 className="text-lg font-bold text-white tracking-tight">
+                {selectedPeerProfile.nickname}
+              </h3>
+              <span className="text-[10px] font-bold text-zinc-500 tracking-wider uppercase font-sans mt-1">
+                AMU Student
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleStartPrivateChat}
+                disabled={isCreatingChat}
+                className="w-full h-12 rounded-xl bg-[#00F0A0] text-black font-semibold flex items-center justify-center gap-2.5 active:scale-95 transition-transform disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {isCreatingChat ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                    <span>Connecting...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                    <span>Message Student</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedPeerProfile(null)}
+                className="w-full h-12 rounded-xl bg-zinc-900/50 border border-zinc-800 text-zinc-400 font-semibold flex items-center justify-center active:scale-95 transition-transform cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Safety Reporting Overlay Dialog */}
       {reportingMessageId && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
@@ -1188,6 +1314,49 @@ export default function ChatRoomClient({
           <span className="text-xs text-zinc-400 font-sans tracking-wide">
             Encrypting & Uploading Media...
           </span>
+        </div>
+      )}
+
+      {/* Premium Glassmorphic Toast Notification */}
+      {toast && (
+        <div 
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-300 ease-out transform"
+          style={{
+            animation: "toastSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards"
+          }}
+        >
+          <style>{`
+            @keyframes toastSlideIn {
+              from {
+                opacity: 0;
+                transform: translate(-50%, -20px);
+              }
+              to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+              }
+            }
+          `}</style>
+          <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-[#0F0F15]/95 border border-zinc-800/80 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] max-w-sm pointer-events-auto">
+            {toast.type === "success" && (
+              <span className="w-5.5 h-5.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-bold shrink-0 select-none">
+                ✓
+              </span>
+            )}
+            {toast.type === "error" && (
+              <span className="w-5.5 h-5.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center text-[10px] font-bold shrink-0 select-none">
+                ✕
+              </span>
+            )}
+            {toast.type === "info" && (
+              <span className="w-5.5 h-5.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center text-[10px] font-bold shrink-0 select-none">
+                ℹ
+              </span>
+            )}
+            <p className="text-xs font-semibold text-zinc-300 font-sans tracking-wide leading-relaxed select-none">
+              {toast.message}
+            </p>
+          </div>
         </div>
       )}
     </main>

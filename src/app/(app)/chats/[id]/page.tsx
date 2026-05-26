@@ -30,14 +30,6 @@ export default async function ChatRoomPage({ params }: PageProps) {
     roomName = "Global AMU Chat";
     avatarEmoji = "🎓";
     roomType = "group";
-  } else if (id === "mock-dm-techiegeek") {
-    roomName = "TechieGeek";
-    avatarEmoji = "🤖";
-    roomType = "direct";
-  } else if (id === "mock-dm-ecowarrior") {
-    roomName = "EcoWarrior";
-    avatarEmoji = "🌱";
-    roomType = "direct";
   } else {
     // Database Room Lookup
     const { data: roomData } = await supabase

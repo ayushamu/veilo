@@ -12,6 +12,7 @@ const r2 = new S3Client({
     accessKeyId: process.env.R2_ACCESS_KEY_ID || "mock-access-key",
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "mock-secret-key",
   },
+  forcePathStyle: true, // Crucial for Cloudflare R2 path-style URLs to resolve DNS
 });
 
 export interface PresignedResponse {
