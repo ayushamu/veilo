@@ -43,6 +43,7 @@ interface MessageBubbleProps {
     aspect_ratio?: number;
   };
   isPinned?: boolean;
+  isRead?: boolean;
 }
 
 const isEmojiOnly = (text: string) => {
@@ -132,6 +133,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   onImageClick,
   mediaMetadata,
   isPinned,
+  isRead = false,
 }) => {
   if (process.env.NODE_ENV === "development") {
     console.log(`[Veilo Performance] Render MessageBubble: ${id} | content: ${content.substring(0, 15)}`);
@@ -415,7 +417,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
           {isMine && (
             <>
               {deliveryStatus === "sending" && (
-                <span className="text-[9px] text-zinc-600 font-sans">sending</span>
+                <span className="text-[10px] text-zinc-500 font-sans animate-pulse flex items-center justify-center">🕒</span>
               )}
               {deliveryStatus === "failed" && clientMessageId && (
                 <button
@@ -427,21 +429,55 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
                 </button>
               )}
               {deliveryStatus !== "sending" && deliveryStatus !== "failed" && (
-                <span className="text-[#00F0A0]">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                </span>
+                <>
+                  {isRead ? (
+                    <span className="text-[#00F0A0] flex items-center shadow-[0_0_8px_rgba(0,240,160,0.15)] select-none">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="mr-[-5px]"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </span>
+                  ) : (
+                    <span className="text-zinc-600 flex items-center select-none">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3.0"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </span>
+                  )}
+                </>
               )}
             </>
           )}
@@ -471,6 +507,7 @@ export const MessageBubble = memo(MessageBubbleComponent, (prev, next) => {
     prev.currentUserId === next.currentUserId &&
     prev.senderId === next.senderId &&
     prev.isPinned === next.isPinned &&
+    prev.isRead === next.isRead &&
     // Check custom reactions map
     areReactionsEqual(prev.reactions, next.reactions)
   );

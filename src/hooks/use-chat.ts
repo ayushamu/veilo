@@ -241,6 +241,17 @@ export function useChat(
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [hasMore, setHasMore] = useState(true);
   
+  const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
+  const [peerPresence, setPeerPresence] = useState<{
+    peer_id: string;
+    nickname: string;
+    avatar_emoji: string;
+    last_seen_at: string | null;
+    show_last_seen: boolean;
+  } | null>(null);
+  const [onlineCount, setOnlineCount] = useState<number>(1);
+  const [isPeerOnline, setIsPeerOnline] = useState<boolean>(false);
+  
   const channelRef = useRef<{ track: (payload: { typing: boolean }) => unknown } | null>(null);
   const batchQueueRef = useRef<(() => Promise<void>)[]>([]);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -478,6 +489,22 @@ export function useChat(
       .on(
         "postgres_changes",
         {
+          event: "UPDATE",
+          schema: "public",
+          table: "room_participants",
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload: any) => {
+          const updatedParticipant = payload.new;
+          if (updatedParticipant.profile_id !== currentUserId) {
+            console.log("[useChat] Realtime peer read timestamp received:", updatedParticipant.last_read_at);
+            setPeerLastReadAt(updatedParticipant.last_read_at);
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
           event: "INSERT",
           schema: "public",
           table: "messages",
@@ -616,6 +643,14 @@ export function useChat(
       .on("presence", { event: "sync" }, async () => {
         const syncId = ++presenceSyncCounterRef.current;
         const state = channel.presenceState();
+        
+        // Count unique online participants
+        const uniqueUserIds = Object.keys(state);
+        setOnlineCount(uniqueUserIds.length);
+
+        // Check if the other user (DM peer) is online
+        const hasOtherUser = uniqueUserIds.some(id => id !== currentUserId);
+        setIsPeerOnline(hasOtherUser);
         
         // 1. Identify who is currently typing
         const typingUserIds: string[] = [];
@@ -924,6 +959,44 @@ export function useChat(
     }, 450);
   }, [currentUserId, roomId, supabase]);
 
+  // Fetch peer read status and presence details on mount / room change
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchPeerStatus = async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_peer_presence_and_read_status", {
+          p_room_id: roomId,
+          p_current_user_id: currentUserId
+        });
+
+        if (error) {
+          console.log("[useChat] Room is likely a group chat, bypassing DM peer stats:", error.message);
+          return;
+        }
+
+        if (isMounted && data && data.length > 0) {
+          const peer = data[0];
+          setPeerLastReadAt(peer.peer_last_read_at);
+          setPeerPresence({
+            peer_id: peer.peer_id,
+            nickname: peer.nickname,
+            avatar_emoji: peer.avatar_emoji,
+            last_seen_at: peer.last_seen_at,
+            show_last_seen: peer.show_last_seen,
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch DM peer status:", err);
+      }
+    };
+
+    fetchPeerStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, [roomId, currentUserId, supabase]);
+
   // Auto-sync missed messages when tab becomes visible or window gains focus
   useEffect(() => {
     const handleVisibility = () => {
@@ -998,5 +1071,9 @@ export function useChat(
     markRoomRead,
     deleteMessage,
     pinMessage,
+    peerLastReadAt,
+    peerPresence,
+    onlineCount,
+    isPeerOnline,
   };
 }

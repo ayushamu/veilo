@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import { useBackgroundCleanup } from "@/hooks/use-cleanup";
+import { usePresenceTracker } from "@/hooks/use-presence-tracker";
 
 const CACHE_KEY = "veilo:chat-inbox:v1";
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -344,6 +345,7 @@ export function InboxProvider({ children }: { children: React.ReactNode }) {
   useBackgroundCleanup();
   
   const currentUserId = useInboxZustandStore((state) => state.currentUserId);
+  usePresenceTracker(currentUserId);
   const initializeFromCache = useInboxZustandStore((state) => state.initializeFromCache);
   const refreshInbox = useInboxZustandStore((state) => state.refreshInbox);
 

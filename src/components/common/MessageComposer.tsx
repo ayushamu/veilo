@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { type ReplyDraft } from "@/hooks/use-chat";
 
 interface MessageComposerProps {
@@ -29,6 +29,29 @@ export default function MessageComposer({
 }: MessageComposerProps) {
   const [inputText, setInputText] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const adjustHeight = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+  };
+
+  useEffect(() => {
+    adjustHeight();
+  }, [inputText]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const trimmed = inputText.trim();
+      if (!trimmed) return;
+      onSend(trimmed);
+      setInputText("");
+      setShowEmojiPicker(false);
+    }
+  };
 
   // Debounced typing notifications
   useEffect(() => {
@@ -178,14 +201,20 @@ export default function MessageComposer({
         </button>
 
         {/* Text Input area */}
-        <div className="flex-1 bg-[#12121A]/70 border border-zinc-900 rounded-full flex items-center px-4 py-2 h-11 shadow-inner focus-within:border-zinc-850 transition-colors relative">
-          <input
+        <div className="flex-1 bg-[#12121A]/70 border border-zinc-900 rounded-2xl flex items-end px-4 py-2.5 min-h-[44px] h-auto shadow-inner focus-within:border-zinc-850 transition-colors relative">
+          <textarea
+            ref={textareaRef}
             id="composer-input"
-            type="text"
+            rows={1}
             required
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            className="bg-transparent border-none text-white text-[14px] placeholder-zinc-650 w-full focus:ring-0 focus:outline-none font-sans pr-8"
+            onKeyDown={handleKeyDown}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            autoCapitalize="sentences"
+            className="bg-transparent border-none text-white text-[14px] placeholder-zinc-650 w-full focus:ring-0 focus:outline-none font-sans pr-8 resize-none py-1 h-[24px] max-h-[120px] overflow-y-auto"
             placeholder="Message in anonymous room..."
             data-testid="composer-input"
           />
@@ -193,7 +222,7 @@ export default function MessageComposer({
           <button
             type="button"
             onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-            className="absolute right-3.5 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+            className="absolute right-3.5 bottom-3 text-zinc-500 hover:text-white transition-colors cursor-pointer"
             title="Emojis"
           >
             <svg

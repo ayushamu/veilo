@@ -48,6 +48,28 @@ const isEmojiOnly = (text: string) => {
   return /^[\p{Extended_Pictographic}\s\u200d\ufe0f]+$/u.test(trimmed);
 };
 
+const formatLastSeen = (isoString: string | null): string => {
+  if (!isoString) return "Offline";
+  try {
+    const lastSeen = new Date(isoString);
+    const now = new Date();
+    const diffMs = now.getTime() - lastSeen.getTime();
+    if (diffMs < 0) return "Active just now";
+    
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHr = Math.floor(diffMin / 60);
+    
+    if (diffSec < 60) return "Active just now";
+    if (diffMin < 60) return `Active ${diffMin}m ago`;
+    if (diffHr < 24) return `Active ${diffHr}h ago`;
+    
+    return `Active ${lastSeen.toLocaleDateString([], { month: "short", day: "numeric" })} at ${lastSeen.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  } catch {
+    return "Offline";
+  }
+};
+
 function getReplyDraft(message: Message, currentUserId: string): ReplyDraft {
   return {
     messageId: message.id,
@@ -243,6 +265,10 @@ export default function ChatRoomClient({
     markRoomRead,
     deleteMessage,
     pinMessage,
+    peerLastReadAt,
+    peerPresence,
+    onlineCount,
+    isPeerOnline,
   } = useChat(roomId, currentUserId);
 
   const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
@@ -977,11 +1003,38 @@ export default function ChatRoomClient({
               <h1 className="text-[15px] font-bold text-white tracking-tight truncate">
                 {roomData.name}
               </h1>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="w-1.5 h-1.5 bg-[#00F0A0] rounded-full shadow-[0_0_6px_rgba(0,240,160,0.5)] animate-pulse" />
-                <span className="text-[9px] font-bold text-zinc-500 tracking-wider uppercase font-sans">
-                  {roomData.type === "group" ? "Group Chat" : "Private Chat"}
-                </span>
+              <div className="flex items-center gap-1.5 mt-0.5 select-none">
+                {roomData.type === "group" ? (
+                  <>
+                    <span className="w-1.5 h-1.5 bg-[#00F0A0] rounded-full shadow-[0_0_6px_rgba(0,240,160,0.5)] animate-pulse" />
+                    <span className="text-[9px] font-bold text-zinc-500 tracking-wider uppercase font-sans">
+                      {onlineCount > 1 ? `${onlineCount} Online` : "Group Chat"}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {isPeerOnline ? (
+                      <>
+                        <span className="w-1.5 h-1.5 bg-[#00F0A0] rounded-full shadow-[0_0_6px_rgba(0,240,160,0.5)] animate-pulse" />
+                        <span className="text-[9px] font-bold text-[#00F0A0] tracking-wider uppercase font-sans animate-in fade-in duration-200">
+                          Active now
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        {peerPresence && peerPresence.show_last_seen ? (
+                          <span className="text-[9px] font-bold text-zinc-500 tracking-wider uppercase font-sans transition-all duration-300">
+                            {formatLastSeen(peerPresence.last_seen_at)}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-bold text-zinc-500 tracking-wider uppercase font-sans">
+                            Private Chat
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
                 {roomData.pinned_message_id && (
                   <>
                     <span className="text-zinc-650 text-[10px] select-none">•</span>
@@ -1223,6 +1276,7 @@ export default function ChatRoomClient({
                   onImageClick={handleImageClick}
                   mediaMetadata={msg.media_metadata}
                   isPinned={roomData.pinned_message_id === msg.id}
+                  isRead={isMine && Boolean(peerLastReadAt) && (new Date(msg.created_at).getTime() <= new Date(peerLastReadAt!).getTime())}
                 />
               </Fragment>
             );

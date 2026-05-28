@@ -168,3 +168,75 @@ export async function getActiveUserCount(): Promise<ActionResponse<number>> {
     return { success: true, data: 184 }; // Resilient fallback
   }
 }
+
+/**
+ * Throttled heartbeat to update the user's last active timestamp.
+ */
+export async function updateLastSeen(): Promise<ActionResponse> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return { success: false, message: "Session expired." };
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("id", user.id);
+
+    if (error) {
+      console.error("Failed to update last seen timestamp:", error);
+      return { success: false, message: "Database update failed." };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Update last seen server error:", err);
+    return { success: false, message: "Server error occurred." };
+  }
+}
+
+/**
+ * Toggles the user's presence privacy preferences.
+ */
+export async function updatePresencePrivacy(
+  showLastSeen: boolean
+): Promise<ActionResponse> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return { success: false, message: "Session expired." };
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ show_last_seen: showLastSeen })
+      .eq("id", user.id);
+
+    if (error) {
+      console.error("Failed to update presence privacy settings:", error);
+      return { success: false, message: "Database update failed." };
+    }
+
+    return {
+      success: true,
+      message: `Last seen status visibility successfully ${
+        showLastSeen ? "enabled" : "disabled"
+      }.`,
+    };
+  } catch (err) {
+    console.error("Update presence privacy server error:", err);
+    return { success: false, message: "Server error occurred." };
+  }
+}
+

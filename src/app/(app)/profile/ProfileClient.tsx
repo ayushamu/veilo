@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import BottomNav from "@/components/common/BottomNav";
 import { signOut, setUserPassword } from "@/app/actions/auth";
 import { useFcm } from "@/hooks/use-fcm";
+import { updatePresencePrivacy } from "@/app/actions/profile";
 
 interface ProfileSummary {
   nickname: string;
@@ -14,6 +15,7 @@ interface ProfileSummary {
   joinedDate: string;
   blockCount: number;
   hasPassword: boolean;
+  showLastSeen: boolean;
 }
 
 interface ProfileClientProps {
@@ -33,6 +35,31 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
   const [pwdError, setPwdError] = useState("");
   const [pwdSuccess, setPwdSuccess] = useState("");
   const [hasPasswordState, setHasPasswordState] = useState(profileSummary.hasPassword);
+  const [showLastSeenState, setShowLastSeenState] = useState(profileSummary.showLastSeen);
+  const [privacyLoading, setPrivacyLoading] = useState(false);
+
+  const handleTogglePresencePrivacy = async () => {
+    if (privacyLoading) return;
+    setPrivacyLoading(true);
+    const nextVal = !showLastSeenState;
+    
+    // Optimistic UI update
+    setShowLastSeenState(nextVal);
+    
+    try {
+      const res = await updatePresencePrivacy(nextVal);
+      if (!res.success) {
+        // Revert on error
+        setShowLastSeenState(!nextVal);
+        alert(res.message || "Failed to update privacy preference.");
+      }
+    } catch (err) {
+      setShowLastSeenState(!nextVal);
+      console.error("Privacy toggle error:", err);
+    } finally {
+      setPrivacyLoading(false);
+    }
+  };
 
   const { permission, requestPermission, loading: fcmLoading } = useFcm();
 
@@ -291,6 +318,37 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
                 </div>
               </div>
               <span className="text-[10px] font-bold text-zinc-500 font-sans uppercase">Active</span>
+            </div>
+
+            {/* Show Last Seen Toggle row */}
+            <div className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3.5">
+                <div className={`p-2.5 rounded-xl flex items-center justify-center transition-colors duration-150 ${showLastSeenState ? "bg-[#00F0A0]/10 text-[#00F0A0]" : "bg-zinc-900/80 text-zinc-400"}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-white">Show Last Seen</p>
+                  <p className="text-xs text-zinc-500 font-sans mt-0.5">Let other users see when you were last active</p>
+                </div>
+              </div>
+              
+              <button
+                type="button"
+                onClick={handleTogglePresencePrivacy}
+                disabled={privacyLoading}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#00F0A0]/20 ${
+                  showLastSeenState ? "bg-[#00F0A0]" : "bg-zinc-800"
+                } ${privacyLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    showLastSeenState ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
             </div>
 
             {/* Clear cache row */}

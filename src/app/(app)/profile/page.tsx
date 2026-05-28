@@ -66,6 +66,7 @@ export default async function ProfilePage() {
         joinedDate,
         blockCount: blockCount || 0,
         hasPassword: profile.has_password,
+        showLastSeen: profile.show_last_seen !== false,
       }}
     />
   );
