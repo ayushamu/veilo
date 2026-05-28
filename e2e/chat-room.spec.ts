@@ -206,7 +206,7 @@ test.describe('Veilo Mobile UX E2E Test Suite', () => {
     // Navigate to /chats
     const listStart = performance.now();
     await page.goto('/chats');
-    await expect(page.locator('text=Veilo')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Veilo', exact: true })).toBeVisible();
     
     // Tap the first visible room
     const roomLink = page.locator('[data-testid="room-item"]').first();
@@ -298,9 +298,10 @@ test.describe('Veilo Mobile UX E2E Test Suite', () => {
     await composer.fill(msgText);
     await sendButton.click();
 
-    // Verify it appears in feed
-    const messageContent = page.locator(`[data-testid="message-content"] >> text=${msgText}`).first();
-    await expect(messageContent).toBeVisible();
+    // Verify it appears in feed and is reconciled to 'sent' status
+    const messageBubble = page.locator(`[data-testid="message-bubble"]:has-text("${msgText}")`).first();
+    await expect(messageBubble).toHaveAttribute('data-delivery-status', 'sent', { timeout: 5000 });
+    const messageContent = messageBubble.locator('[data-testid="message-content"]');
 
     // Trigger right click to open Context Menu Action Sheet
     await messageContent.click({ button: 'right' });
@@ -325,9 +326,10 @@ test.describe('Veilo Mobile UX E2E Test Suite', () => {
     await composer.fill(msgText);
     await sendButton.click();
 
-    // Verify message bubble appears
-    const messageContent = page.locator(`[data-testid="message-content"] >> text=${msgText}`).first();
-    await expect(messageContent).toBeVisible();
+    // Verify message bubble appears and is reconciled to 'sent' status
+    const messageBubble = page.locator(`[data-testid="message-bubble"]:has-text("${msgText}")`).first();
+    await expect(messageBubble).toHaveAttribute('data-delivery-status', 'sent', { timeout: 5000 });
+    const messageContent = messageBubble.locator('[data-testid="message-content"]');
 
     // Trigger right click to open Context Menu Action Sheet
     await messageContent.click({ button: 'right' });
@@ -344,8 +346,8 @@ test.describe('Veilo Mobile UX E2E Test Suite', () => {
     await expect(pinnedBanner).toContainText(msgText);
 
     // Verify subtle 📌 Pinned tag on message bubble appears
-    const messageBubble = page.locator(`[data-testid="message-bubble"]:has-text("${msgText}")`);
-    const pinnedBadge = messageBubble.locator('[data-testid="pinned-badge"]');
+    const messageBubbleInstance = page.locator(`[data-testid="message-bubble"]:has-text("${msgText}")`);
+    const pinnedBadge = messageBubbleInstance.locator('[data-testid="pinned-badge"]');
     await expect(pinnedBadge).toBeVisible();
 
     // Verify small header indicator is shown

@@ -937,7 +937,7 @@ export default function ChatRoomClient({
   return (
     <main
       ref={mainRef}
-      className="flex-1 flex flex-col bg-[#08080C] min-h-screen relative overflow-hidden"
+      className="flex-1 flex flex-col bg-[#08080C] h-full relative overflow-hidden"
     >
       {/* Background Decorative Blur */}
       <div className="absolute inset-0 pointer-events-none">

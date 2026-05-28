@@ -55,7 +55,7 @@ export default function ChatsPage() {
   const shouldShowBlockingLoader = loadingInitial && rooms.length === 0;
 
   return (
-    <main className="flex-1 flex flex-col bg-[#08080C] min-h-screen pb-24">
+    <main className="flex-1 flex flex-col bg-[#08080C] h-full pb-24">
       {/* Top Header */}
       <header className="sticky top-0 z-40 bg-[#08080C]/85 backdrop-blur-md border-b border-zinc-900/60 px-6 py-4 flex items-center justify-between">
         <div className="flex flex-col">

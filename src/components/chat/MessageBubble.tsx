@@ -202,7 +202,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
 
   return (
     <div
-      className={`flex gap-2.5 group animate-in fade-in slide-in-from-bottom-2 duration-300 relative ${
+      className={`flex items-end h-fit gap-2.5 group animate-in fade-in slide-in-from-bottom-2 duration-300 relative ${
         isMine ? "justify-end" : "justify-start"
       }`}
       data-testid="message-bubble"
@@ -221,7 +221,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         </button>
       )}
 
-      <div className={`flex flex-col gap-1 max-w-[75%] min-w-0 ${isMine ? "items-end" : "items-start"}`}>
+      <div className={`flex flex-col h-fit gap-1 max-w-[75%] min-w-0 ${isMine ? "items-end" : "items-start"}`}>
         {isPinned && (
           <span className="text-[9px] font-black text-amber-400 uppercase tracking-wider font-sans flex items-center gap-0.5 ml-1 select-none mb-0.5" data-testid="pinned-badge">
             📌 Pinned
