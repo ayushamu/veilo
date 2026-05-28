@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Join Veilo | Verify your AMU Student Email",
     description: "Welcome to Veilo, the anonymous heart of Aligarh. Connect with verified AMU students safely and privately.",
-    url: "https://velio.shop/login",
+    url: "https://veilo.shop/login",
   },
 };
 

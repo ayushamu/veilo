@@ -2,54 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-
-interface BeforeInstallPromptEvent extends Event {
-  readonly platforms: string[];
-  readonly userChoice: Promise<{
-    outcome: "accepted" | "dismissed";
-    platform: string;
-  }>;
-  prompt(): Promise<void>;
-}
-
-interface NavigatorWithStandalone extends Navigator {
-  standalone?: boolean;
-}
+import { usePwa } from "@/hooks/use-pwa";
 
 export default function PwaPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const { deferredPrompt, isStandalone, canInstall, triggerInstall } = usePwa();
   const [showPrompt, setShowPrompt] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    // 1. Check if already running in standalone mode (installed PWA)
-    const checkStandalone = () => {
-      const isStandaloneMode = 
-        window.matchMedia("(display-mode: standalone)").matches ||
-        (window.navigator as NavigatorWithStandalone).standalone === true;
-      setIsStandalone(isStandaloneMode);
-    };
-
-    checkStandalone();
-
-    // 2. Register Service Worker
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js")
-        .then((reg) => {
-          console.log("Service Worker registered successfully with scope: ", reg.scope);
-        })
-        .catch((err) => {
-          console.error("Service Worker registration failed: ", err);
-        });
-    }
-
-    // 3. Listen for beforeinstallprompt event
-    const handleBeforeInstallPrompt = (e: Event) => {
-      // Prevent the mini-infobar from appearing on mobile
-      e.preventDefault();
-      // Stash the event so it can be triggered later.
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-
+    if (canInstall) {
       // Check if user has previously dismissed the prompt in this session
       const dismissed = sessionStorage.getItem("pwa_dismissed");
       if (!dismissed) {
@@ -59,38 +19,12 @@ export default function PwaPrompt() {
         }, 2000);
         return () => clearTimeout(timer);
       }
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-
-    // 4. Listen for appinstalled event
-    const handleAppInstalled = () => {
-      console.log("Veilo was installed successfully!");
-      setDeferredPrompt(null);
-      setShowPrompt(false);
-      setIsStandalone(true);
-    };
-
-    window.addEventListener("appinstalled", handleAppInstalled);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
-  }, []);
+    }
+  }, [canInstall]);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-
-    // Show the native browser install prompt
-    await deferredPrompt.prompt();
-
-    // Wait for the user to respond to the prompt
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`User response to install prompt: ${outcome}`);
-
-    if (outcome === "accepted") {
-      setDeferredPrompt(null);
+    const success = await triggerInstall();
+    if (success) {
       setShowPrompt(false);
     }
   };

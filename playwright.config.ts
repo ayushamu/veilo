@@ -50,7 +50,7 @@ export default defineConfig({
 
   /* Run local dev server before starting the tests */
   webServer: {
-    command: 'npm run dev',
+    command: 'VEILO_E2E_AUTH_ENABLED=true NEXT_PUBLIC_VEILO_E2E_AUTH_ENABLED=true VEILO_E2E_AUTH_SECRET=veilo-local-e2e-secret npm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 30000,

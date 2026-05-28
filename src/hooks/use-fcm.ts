@@ -43,12 +43,9 @@ export function useFcm() {
     }
 
     try {
-      console.log("🔍 [FCM Hook] Registering token... Waiting for service worker ready state.");
       const registration = await navigator.serviceWorker.ready;
-      console.log("🔍 [FCM Hook] Service Worker ready. Scope:", registration.scope);
 
       const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY;
-      console.log("🔍 [FCM Hook] VAPID Key from env:", vapidKey ? `${vapidKey.substring(0, 10)}...` : "UNDEFINED!");
 
       const currentToken = await getToken(messaging, {
         vapidKey,
@@ -77,8 +74,6 @@ export function useFcm() {
 
           if (error) {
             console.error("Failed to register token in Supabase fcm_tokens table:", error);
-          } else {
-            console.log("🔍 [FCM Hook] Token synchronized successfully:", currentToken);
           }
         }
         return currentToken;

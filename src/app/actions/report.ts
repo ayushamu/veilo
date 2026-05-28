@@ -7,6 +7,15 @@ import { ActionResponse } from "./auth";
 const resend = new Resend(process.env.RESEND_API_KEY || "re_mock");
 const ADMIN_SUPPORT_EMAIL = "help.veilo@gmail.com";
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Template 3 HTML definition
 const REPORT_CONFIRMATION_HTML = `
 <!DOCTYPE html>
@@ -142,9 +151,10 @@ const REPORT_CONFIRMATION_HTML = `
 export async function submitSafetyReport(
   messageId: string,
   reason: string,
-  roomId: string
+  _roomId: string
 ): Promise<ActionResponse> {
   try {
+    void _roomId;
     const supabase = await createClient();
 
     // 1. Authenticate reporter session
@@ -161,6 +171,7 @@ export async function submitSafetyReport(
     const { data: offendingMessage, error: msgError } = await supabase
       .from("messages")
       .select(`
+        room_id,
         content,
         sender_id,
         profiles (
@@ -174,21 +185,37 @@ export async function submitSafetyReport(
       return { success: false, message: "Failed to load message context for report." };
     }
 
+    const { data: participant, error: participantError } = await supabase
+      .from("room_participants")
+      .select("profile_id")
+      .eq("room_id", offendingMessage.room_id)
+      .eq("profile_id", user.id)
+      .maybeSingle();
+
+    if (participantError || !participant) {
+      return { success: false, message: "You can only report messages from rooms you participate in." };
+    }
+
     // Resolve profile details dynamically (Supabase joins may return arrays or objects depending on FK type maps)
     const rawProfiles = offendingMessage.profiles as
       | { nickname?: string }
       | { nickname?: string }[]
       | null;
-    const offenderNickname = Array.isArray(rawProfiles)
+    const offenderNickname = (Array.isArray(rawProfiles)
       ? rawProfiles[0]?.nickname
-      : rawProfiles?.nickname || "Anonymous Student";
+      : rawProfiles?.nickname) || "Anonymous Student";
+    const trimmedReason = reason.trim();
+    const escapedReason = escapeHtml(trimmedReason);
+    const escapedContent = escapeHtml(offendingMessage.content);
+    const escapedNickname = escapeHtml(offenderNickname);
+    const reportRoomId = offendingMessage.room_id;
 
     // 3. Log the report inside PostgreSQL
     const { error: dbError } = await supabase.from("user_reports").insert({
       reporter_id: user.id,
       reported_id: offendingMessage.sender_id,
-      room_id: roomId,
-      reason: reason.trim(),
+      room_id: reportRoomId,
+      reason: trimmedReason,
       content_snapshot: {
         message_content: offendingMessage.content,
         message_sender: offenderNickname,
@@ -210,10 +237,10 @@ export async function submitSafetyReport(
           <h3>New Safety Incident Report</h3>
           <p><strong>Reporter UID:</strong> ${user.id} (Redacted on public tables)</p>
           <p><strong>Offender UID:</strong> ${offendingMessage.sender_id}</p>
-          <p><strong>Offender Nickname:</strong> ${offenderNickname}</p>
-          <p><strong>Room ID:</strong> ${roomId}</p>
-          <p><strong>Reason Filed:</strong> ${reason}</p>
-          <p><strong>Message Content Snapshot:</strong> "${offendingMessage.content}"</p>
+          <p><strong>Offender Nickname:</strong> ${escapedNickname}</p>
+          <p><strong>Room ID:</strong> ${reportRoomId}</p>
+          <p><strong>Reason Filed:</strong> ${escapedReason}</p>
+          <p><strong>Message Content Snapshot:</strong> "${escapedContent}"</p>
         `,
       });
 

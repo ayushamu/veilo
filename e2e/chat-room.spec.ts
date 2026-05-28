@@ -1,11 +1,18 @@
 import { test, expect } from '@playwright/test';
 
 // Define E2E cookies to bypass real Supabase Auth servers
-const MOCK_USER_ID = 'test-e2e-student-456';
+const MOCK_USER_ID = '11111111-1111-4111-8111-111111111111';
+const E2E_AUTH_SECRET = process.env.VEILO_E2E_AUTH_SECRET || 'veilo-local-e2e-secret';
 const E2E_COOKIES = [
   {
     name: 'veilo-e2e-user-id',
     value: MOCK_USER_ID,
+    domain: 'localhost',
+    path: '/',
+  },
+  {
+    name: 'veilo-e2e-auth-secret',
+    value: E2E_AUTH_SECRET,
     domain: 'localhost',
     path: '/',
   },

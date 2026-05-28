@@ -40,6 +40,7 @@ const POPULAR_EMOJIS = [
   "🥳", "💯", "🤫", "🤡", "🫠", "🧐", "😎", "🙄",
   "😢", "😡", "💩", "💡", "📌", "🚀", "✨", "📱"
 ];
+const MAX_IMAGE_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 const isEmojiOnly = (text: string) => {
   const trimmed = text.trim();
@@ -862,12 +863,16 @@ export default function ChatRoomClient({
 
       // 2. Client-side EXIF stripping & compression to WebP
       optimizedBlob = await optimizeAndStripImage(fileToOptimize);
+      if (optimizedBlob.size > MAX_IMAGE_UPLOAD_BYTES) {
+        throw new Error("Image is too large after optimization.");
+      }
 
       // 3. Request presigned upload URL from R2
       const res = await getPresignedUploadUrl(
         roomId,
         originalFileName.replace(/\.[^/.]+$/, "") + ".webp",
-        "image/webp"
+        "image/webp",
+        optimizedBlob.size
       );
 
       if (!res.success || !res.data) {
@@ -897,28 +902,9 @@ export default function ChatRoomClient({
       requestAnimationFrame(() => scrollToBottom("smooth"));
       setIsUploading(false);
     } catch (err) {
-      console.warn("R2 upload failed, falling back to local base64 mock storage:", err);
-      
-      // If we have the optimized blob, convert to Base64 so the app works locally without external R2 config
-      if (optimizedBlob) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64data = reader.result as string;
-          sendMessage("", { type: "image", mediaUrl: base64data, replyTo: replyingTo });
-          setReplyingTo(null);
-          setShowNewMessages(false);
-          requestAnimationFrame(() => scrollToBottom("smooth"));
-          setIsUploading(false);
-        };
-        reader.onerror = () => {
-          showToast("Failed to process image fallback.", "error");
-          setIsUploading(false);
-        };
-        reader.readAsDataURL(optimizedBlob);
-      } else {
-        showToast("Failed to securely share image. Please try again.", "error");
-        setIsUploading(false);
-      }
+      console.error("Secure image upload failed:", err);
+      showToast("Failed to securely share image. Please try again.", "error");
+      setIsUploading(false);
     }
   };
 

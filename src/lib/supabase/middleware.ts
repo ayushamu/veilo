@@ -1,5 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { getE2EMockUserId } from "@/lib/security/e2e-auth";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -27,24 +29,21 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // E2E Test Authentication Mock Bypass
-  const mockUserId = request.cookies.get("veilo-e2e-user-id")?.value;
+  // E2E-only auth mock. Requires NODE_ENV=test and a matching secret cookie.
+  const mockUserId = getE2EMockUserId(request.cookies);
   if (mockUserId) {
     const originalAuth = supabase.auth;
-    supabase.auth = {
-      ...originalAuth,
-      getUser: async () => {
-        return {
-          data: {
-            user: {
-              id: mockUserId,
-              email: "test@myamu.ac.in",
-            } as any,
-          },
-          error: null,
-        };
-      },
-    } as any;
+    originalAuth.getUser = async () => {
+      return {
+        data: {
+          user: {
+            id: mockUserId,
+            email: "test@myamu.ac.in",
+          } as User,
+        },
+        error: null,
+      };
+    };
   }
 
   // Refresh token if expired
@@ -66,11 +65,12 @@ export async function updateSession(request: NextRequest) {
   }
 
   const isAuthPage = path.startsWith("/login") || path.startsWith("/verify");
+  const isPublicPage = path === "/" || path === "/terms" || path === "/privacy" || isAuthPage;
   const isOnboardingPage = path.startsWith("/onboarding");
 
   // 1. Not Authenticated
   if (!user) {
-    if (!isAuthPage) {
+    if (!isPublicPage) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
     return supabaseResponse;
@@ -114,6 +114,14 @@ export async function updateSession(request: NextRequest) {
     if (status === "active" && (isAuthPage || isOnboardingPage)) {
       return NextResponse.redirect(new URL("/chats", request.url));
     }
+  }
+
+  // If authenticated and visiting landing page, redirect based on status
+  if (path === "/") {
+    if (status === "onboarding") {
+      return NextResponse.redirect(new URL("/onboarding", request.url));
+    }
+    return NextResponse.redirect(new URL("/chats", request.url));
   }
 
   return supabaseResponse;

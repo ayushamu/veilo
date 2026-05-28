@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Outfit, Inter } from "next/font/google";
+import { Outfit, Inter, Hanken_Grotesk } from "next/font/google";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -14,7 +14,13 @@ const inter = Inter({
   display: "swap",
 });
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://velio.shop";
+const hankenGrotesk = Hanken_Grotesk({
+  variable: "--font-hanken",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://veilo.shop";
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
@@ -39,7 +45,10 @@ export const metadata: Metadata = {
   publisher: "Veilo",
   manifest: "/manifest.json",
   icons: {
-    icon: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+    ],
     apple: "/icon-192.png",
   },
   openGraph: {
@@ -113,7 +122,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${outfit.variable} ${inter.variable} h-full dark`}
+      className={`${outfit.variable} ${inter.variable} ${hankenGrotesk.variable} h-full dark`}
       style={{ colorScheme: "dark" }}
     >
       <head>
@@ -121,11 +130,10 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
+        <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
       </head>
-      <body className="h-full bg-black flex justify-center items-stretch text-white font-sans antialiased">
-        <div className="w-full max-w-[480px] min-h-full bg-background flex flex-col relative border-x border-zinc-900/50 shadow-[0_0_80px_rgba(0,0,0,0.95)] overflow-hidden">
-          {children}
-        </div>
+      <body className="h-full bg-black text-white font-sans antialiased">
+        {children}
       </body>
     </html>
   );

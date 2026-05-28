@@ -3,8 +3,18 @@
 import crypto from "crypto";
 import { createClient } from "@/lib/supabase/server";
 
+interface FirebaseServiceAccount {
+  client_email: string;
+  private_key: string;
+  project_id?: string;
+}
+
+interface FcmTokenRow {
+  token: string;
+}
+
 // Helper to generate Google OAuth2 Access Token for FCM HTTP v1 using native NodeJS crypto (zero heavy external deps)
-async function getFcmAccessToken(serviceAccount: any): Promise<string> {
+async function getFcmAccessToken(serviceAccount: FirebaseServiceAccount): Promise<string> {
   return new Promise((resolve, reject) => {
     const now = Math.floor(Date.now() / 1000);
     const jwtHeader = {
@@ -98,11 +108,10 @@ export async function sendDmNotification({
     }
 
     if (!tokensData || tokensData.length === 0) {
-      console.log("No active push tokens registered for recipients in room:", roomId);
       return { success: true, sentCount: 0 };
     }
 
-    const tokens = tokensData.map((t: any) => t.token);
+    const tokens = (tokensData as FcmTokenRow[]).map((t) => t.token);
 
     // 5. Fetch service account JSON from environment
     const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
@@ -111,7 +120,7 @@ export async function sendDmNotification({
       return { success: false, reason: "FCM service account configuration missing" };
     }
 
-    const serviceAccount = JSON.parse(serviceAccountJson);
+    const serviceAccount = JSON.parse(serviceAccountJson) as FirebaseServiceAccount;
     const accessToken = await getFcmAccessToken(serviceAccount);
     const projectId = serviceAccount.project_id || "veilo-campus-chat";
 
@@ -177,19 +186,10 @@ export async function sendDmNotification({
         const result = await response.json();
 
         if (!response.ok) {
-          console.warn(`FCM dispatch failed for token: ${token.substring(0, 10)}... Status: ${response.status}`, result);
-          
-          // Check for unregistered or invalid tokens and prune them asynchronously
-          const errorCode = result?.error?.status || "";
-          if (
-            response.status === 404 || 
-            response.status === 410 || 
-            errorCode === "UNREGISTERED" || 
-            errorCode === "INVALID_ARGUMENT"
-          ) {
-            console.log("Pruning stale push registration token:", token.substring(0, 10));
-            await supabase.rpc("delete_stale_fcm_token", { stale_token: token });
-          }
+          console.warn("FCM dispatch failed.", {
+            status: response.status,
+            errorStatus: result?.error?.status,
+          });
           return { token, success: false, status: response.status };
         }
 
@@ -201,7 +201,9 @@ export async function sendDmNotification({
     });
 
     const results = await Promise.allSettled(dispatches);
-    const successCount = results.filter((r) => r.status === "fulfilled" && (r.value as any).success).length;
+    const successCount = results.filter(
+      (r) => r.status === "fulfilled" && r.value.success
+    ).length;
 
     return { success: true, sentCount: successCount, totalTokens: tokens.length };
   } catch (error) {

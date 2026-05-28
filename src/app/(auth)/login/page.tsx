@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { sendOTP, signInWithPassword, signUpWithPassword, sendPasswordReset } from "@/app/actions/auth";
 import { getActiveUserCount } from "@/app/actions/profile";
 
@@ -22,122 +23,6 @@ const MOCK_SIGNUPS: SignupEvent[] = [
   { emoji: "🤖", name: "Neon Cyber", domain: "@amu.ac.in", action: "just verified their student email!" },
   { emoji: "👻", name: "Mystic Specter", domain: "@myamu.ac.in", action: "entered the campus group chat!" },
 ];
-
-
-const TERMS_SECTIONS = [
-  {
-    title: "1. Eligibility",
-    content: [
-      "You must be a currently enrolled university student with a valid university email address.",
-      "You must provide accurate information during verification.",
-      "You must be at least 18 years old or meet the minimum legal age required in your jurisdiction.",
-      "One person may maintain only one active account unless explicitly permitted by Veilo.",
-    ],
-  },
-  {
-    title: "2. Your Privacy & Anonymity",
-    content: [
-      "Your university email is used solely for account verification, security, and account recovery.",
-      "Your email address is never displayed publicly to other users.",
-      "Your real identity is not shown within chats unless you choose to reveal it yourself.",
-      "Veilo provides anonymity to other users, not immunity from platform rules or applicable laws.",
-    ],
-  },
-  {
-    title: "3. Acceptable Use",
-    content: [
-      "You agree to use Veilo respectfully and responsibly.",
-      "You may: participate in discussions, join group conversations, send direct messages, share appropriate images and content, and report users who violate these rules.",
-    ],
-  },
-  {
-    title: "4. Prohibited Conduct",
-    content: [
-      "Harassment, bullying, stalking, or intimidation.",
-      "Hate speech or discrimination based on religion, race, ethnicity, nationality, gender, sexual orientation, disability, or similar characteristics.",
-      "Threats of violence or encouragement of self-harm.",
-      "Sharing private information about another person without permission.",
-      "Impersonating another student, faculty member, organization, or individual.",
-      "Spam, scams, phishing attempts, or fraudulent activity.",
-      "Sharing illegal, obscene, sexually explicit, or exploitative content.",
-      "Uploading malware, harmful software, or malicious links.",
-      "Creating multiple accounts to evade moderation actions.",
-      "Any activity that violates university policies or applicable laws.",
-    ],
-  },
-  {
-    title: "5. Image & Content Sharing",
-    content: [
-      "You are responsible for all content you upload, send, or share.",
-      "Do not upload: illegal content, explicit sexual content, non-consensual images, violent or graphic content, copyright-infringing material, or content intended to harass or target individuals.",
-      "Veilo reserves the right to remove content that violates these rules.",
-    ],
-  },
-  {
-    title: "6. Reporting & Moderation",
-    content: [
-      "Users may report content, messages, groups, or accounts.",
-      "Veilo may review reported content, remove violating content, restrict features, suspend accounts, or permanently ban users.",
-      "Moderation decisions are made to protect community safety and platform integrity.",
-    ],
-  },
-  {
-    title: "7. Account Suspension & Termination",
-    content: [
-      "Veilo may suspend or terminate accounts that violate these Terms, abuse anonymity, harm other users, attempt to bypass platform restrictions, or engage in unlawful activity.",
-      "Repeated violations may result in permanent account removal.",
-    ],
-  },
-  {
-    title: "8. No Absolute Anonymity Guarantee",
-    content: [
-      "Veilo is designed to protect user privacy and anonymity from other users.",
-      "However, Veilo may access account information when necessary to investigate abuse, enforce platform rules, respond to legal obligations, or protect users and platform security.",
-    ],
-  },
-  {
-    title: "9. User Responsibility",
-    content: [
-      "You are solely responsible for your messages, uploaded content, interactions with other users, and any information you voluntarily disclose.",
-      "Think before sharing personal information.",
-    ],
-  },
-  {
-    title: "10. Intellectual Property",
-    content: [
-      "You retain ownership of content you create.",
-      "By posting content on Veilo, you grant Veilo permission to store, display, process, and moderate that content for platform operation and safety purposes.",
-    ],
-  },
-  {
-    title: "11. Service Availability",
-    content: [
-      "Veilo may update, modify, suspend, or discontinue features at any time without prior notice.",
-      "We do not guarantee uninterrupted availability of the service.",
-    ],
-  },
-  {
-    title: "12. Limitation of Liability",
-    content: [
-      "Veilo is provided on an \"as available\" basis.",
-      "To the maximum extent permitted by law, Veilo shall not be liable for indirect, incidental, or consequential damages arising from use of the platform.",
-    ],
-  },
-  {
-    title: "13. Changes to These Terms",
-    content: [
-      "Veilo may update these Terms periodically.",
-      "Continued use of the platform after changes become effective constitutes acceptance of the revised Terms.",
-    ],
-  },
-  {
-    title: "14. Acceptance",
-    content: [
-      "By creating an account or using Veilo, you confirm that you are a verified university student, you understand that anonymity does not exempt you from platform rules, you will use Veilo respectfully and responsibly, and you agree to these Terms of Use and Community Guidelines.",
-    ],
-  },
-];
-
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -147,7 +32,6 @@ export default function LoginPage() {
   const [loginMode, setLoginMode] = useState<"password" | "otp">("password");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [showTerms, setShowTerms] = useState(false);
   const [showEmailHelp, setShowEmailHelp] = useState(false);
   
   const [activeUserCount, setActiveUserCount] = useState<number | null>(null);
@@ -227,6 +111,16 @@ export default function LoginPage() {
 
     const sanitizedEmail = email.trim().toLowerCase();
 
+    const isDeveloper =
+      process.env.NODE_ENV !== "production" && sanitizedEmail === "ayushcmf@gmail.com";
+    const isStudentEmail = /^[a-z]{2}[0-9]{4}@(myamu\.ac\.in|amu\.ac\.in)$/.test(sanitizedEmail);
+
+    if (!isDeveloper && !isStudentEmail) {
+      setLoading(false);
+      setErrorMsg("Student email must start with your 6-character Enrollment Number (e.g., GP1234@myamu.ac.in).");
+      return;
+    }
+
     if (activeTab === "signin") {
       if (loginMode === "password") {
         if (!password) {
@@ -291,6 +185,16 @@ export default function LoginPage() {
     setLoading(true);
     setErrorMsg("");
     const sanitizedEmail = email.trim().toLowerCase();
+
+    const isDeveloper =
+      process.env.NODE_ENV !== "production" && sanitizedEmail === "ayushcmf@gmail.com";
+    const isStudentEmail = /^[a-z]{2}[0-9]{4}@(myamu\.ac\.in|amu\.ac\.in)$/.test(sanitizedEmail);
+
+    if (!isDeveloper && !isStudentEmail) {
+      setLoading(false);
+      setErrorMsg("Student email must start with your 6-character Enrollment Number (e.g., GP1234@myamu.ac.in).");
+      return;
+    }
     
     const res = await sendPasswordReset(sanitizedEmail);
     setLoading(false);
@@ -686,134 +590,37 @@ export default function LoginPage() {
         </section>
 
         {/* Footer */}
-        <footer className="mt-12">
-          <p className="text-[11px] text-zinc-600 font-sans">
+        <footer className="mt-12 space-y-2">
+          <p className="text-[11px] text-zinc-600 font-sans leading-relaxed">
             By joining, you agree to the{" "}
-            <button
-              type="button"
-              onClick={() => setShowTerms(true)}
-              className="underline hover:text-[#00F0A0] transition-colors cursor-pointer"
+            <Link
+              href="/terms"
+              className="underline hover:text-[#00F0A0] transition-colors"
             >
-              Terms of Use &amp; Community Guidelines
-            </button>
+              Terms of Service
+            </Link>{" "}
+            &amp;{" "}
+            <Link
+              href="/privacy"
+              className="underline hover:text-[#00F0A0] transition-colors"
+            >
+              Privacy Policy
+            </Link>
             .
+          </p>
+          <p className="text-[11px] text-zinc-500 font-sans">
+            Follow us on Instagram:{" "}
+            <a
+              href="https://instagram.com/veilo.chat"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-[#00F0A0] transition-colors font-medium text-zinc-500"
+            >
+              @veilo.chat
+            </a>
           </p>
         </footer>
       </div>
-
-      {/* Terms of Use Modal */}
-      {showTerms && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
-          style={{ animation: "fadeIn 0.2s ease-out" }}
-        >
-          <style>{`
-            @keyframes fadeIn {
-              from { opacity: 0; }
-              to { opacity: 1; }
-            }
-            @keyframes slideUp {
-              from { transform: translateY(100%); opacity: 0; }
-              to { transform: translateY(0); opacity: 1; }
-            }
-          `}</style>
-
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setShowTerms(false)}
-          />
-
-          {/* Modal Sheet */}
-          <div
-            className="relative w-full sm:max-w-lg bg-[#0F0F15] border border-zinc-800/80 rounded-t-3xl sm:rounded-2xl shadow-[0_-20px_60px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden"
-            style={{
-              maxHeight: "88vh",
-              animation: "slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards"
-            }}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-zinc-800/60 shrink-0">
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-[#00F0A0] text-base">📋</span>
-                  <h2 className="text-base font-bold text-white font-sans tracking-tight">
-                    Terms of Use & Community Guidelines
-                  </h2>
-                </div>
-                <p className="text-[10px] text-zinc-500 font-sans ml-6">Last Updated: May 2025</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowTerms(false)}
-                className="w-8 h-8 rounded-full bg-zinc-800/80 hover:bg-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90 cursor-pointer shrink-0"
-                aria-label="Close terms"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Intro */}
-            <div className="px-6 pt-4 pb-3 shrink-0">
-              <p className="text-xs text-zinc-400 font-sans leading-relaxed">
-                Welcome to <span className="text-[#00F0A0] font-semibold">Veilo</span> — an anonymous communication platform exclusively for verified university students. By creating an account or using Veilo, you agree to these Terms.
-              </p>
-            </div>
-
-            {/* Scrollable content */}
-            <div className="overflow-y-auto flex-1 px-6 pb-6 space-y-5">
-              {TERMS_SECTIONS.map((section) => (
-                <div key={section.title}>
-                  <h3 className="text-xs font-bold text-[#00F0A0] uppercase tracking-widest mb-2 font-sans">
-                    {section.title}
-                  </h3>
-                  <ul className="space-y-1.5">
-                    {section.content.map((item, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="text-zinc-600 mt-1 shrink-0 text-[8px]">●</span>
-                        <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">{item}</p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-
-              {/* Acceptance checkmarks */}
-              <div className="mt-4 p-4 rounded-xl bg-[#00F0A0]/5 border border-[#00F0A0]/15">
-                <p className="text-[10px] font-bold text-[#00F0A0] uppercase tracking-widest mb-3 font-sans">By joining, you confirm:</p>
-                {[
-                  "You are a verified university student",
-                  "Anonymity does not exempt you from platform rules",
-                  "You will use Veilo respectfully and responsibly",
-                  "You agree to these Terms of Use and Community Guidelines",
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-2 mb-2 last:mb-0">
-                    <span className="w-4 h-4 rounded-full bg-[#00F0A0]/15 border border-[#00F0A0]/30 text-[#00F0A0] flex items-center justify-center text-[8px] font-bold shrink-0">✓</span>
-                    <p className="text-[11px] text-zinc-300 font-sans">{item}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* CTA footer */}
-            <div className="px-6 py-4 border-t border-zinc-800/60 shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowTerms(false)}
-                className="w-full bg-[#00F0A0] text-black text-sm font-bold py-3 rounded-xl active:scale-[0.98] transition-all cursor-pointer"
-              >
-                I Understand, Got it
-              </button>
-              <p className="text-center text-[9px] text-zinc-600 mt-2 font-sans">
-                Contact us at help.veilo@gmail.com for questions
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Institutional Email Help Modal */}
       {showEmailHelp && (

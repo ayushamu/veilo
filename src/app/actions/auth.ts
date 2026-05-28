@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
 
-const WhitelistedDomains = ["@myamu.ac.in", "@amu.ac.in"];
+const DEV_AUTH_EMAIL = "ayushcmf@gmail.com";
 
 export interface ActionResponse<T = unknown> {
   success: boolean;
@@ -18,15 +18,15 @@ export async function sendOTP(email: string): Promise<ActionResponse> {
   try {
     const sanitizedEmail = email.trim().toLowerCase();
     
-    // 1. Verify university domain whitelist (with temporary developer email override)
-    const isValidDomain = 
-      WhitelistedDomains.some((domain) => sanitizedEmail.endsWith(domain)) ||
-      sanitizedEmail === "ayushcmf@gmail.com";
+    // 1. Verify strict AMU student enrollment format: 2 letters, 4 digits (e.g., GP1234@myamu.ac.in)
+    const isDeveloperEmail =
+      process.env.NODE_ENV !== "production" && sanitizedEmail === DEV_AUTH_EMAIL;
+    const isAMUEnrollmentEmail = /^[a-z]{2}[0-9]{4}@(myamu\.ac\.in|amu\.ac\.in)$/.test(sanitizedEmail);
     
-    if (!isValidDomain) {
+    if (!isDeveloperEmail && !isAMUEnrollmentEmail) {
       return {
         success: false,
-        message: "Access restricted. You must sign up using an official AMU email address (@myamu.ac.in or @amu.ac.in).",
+        message: "Access restricted. You must sign up using an official AMU student email starting with your 6-character Enrollment Number (e.g. GP1234@myamu.ac.in or gi9876@amu.ac.in).",
       };
     }
 
@@ -154,15 +154,15 @@ export async function signUpWithPassword(
   try {
     const sanitizedEmail = email.trim().toLowerCase();
     
-    // 1. Verify university domain whitelist
-    const isValidDomain = 
-      WhitelistedDomains.some((domain) => sanitizedEmail.endsWith(domain)) ||
-      sanitizedEmail === "ayushcmf@gmail.com";
+    // 1. Verify strict AMU student enrollment format: 2 letters, 4 digits (e.g., GP1234@myamu.ac.in)
+    const isDeveloperEmail =
+      process.env.NODE_ENV !== "production" && sanitizedEmail === DEV_AUTH_EMAIL;
+    const isAMUEnrollmentEmail = /^[a-z]{2}[0-9]{4}@(myamu\.ac\.in|amu\.ac\.in)$/.test(sanitizedEmail);
     
-    if (!isValidDomain) {
+    if (!isDeveloperEmail && !isAMUEnrollmentEmail) {
       return {
         success: false,
-        message: "Access restricted. You must sign up using an official AMU email address (@myamu.ac.in or @amu.ac.in).",
+        message: "Access restricted. You must sign up using an official AMU student email starting with your 6-character Enrollment Number (e.g. GP1234@myamu.ac.in or gi9876@amu.ac.in).",
       };
     }
 

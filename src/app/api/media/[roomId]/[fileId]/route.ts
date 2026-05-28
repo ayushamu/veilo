@@ -2,14 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { createClient } from "@/lib/supabase/server";
 
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID || "mock-access-key",
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "mock-secret-key",
-  },
-});
+function getR2Config() {
+  const { CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME } =
+    process.env;
+
+  if (!CLOUDFLARE_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME) {
+    throw new Error("R2 media storage is not configured.");
+  }
+
+  return { CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME };
+}
+
+function createR2Client() {
+  const { CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = getR2Config();
+
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: R2_ACCESS_KEY_ID,
+      secretAccessKey: R2_SECRET_ACCESS_KEY,
+    },
+  });
+}
 
 interface RouteParams {
   params: Promise<{ roomId: string; fileId: string }>;
@@ -50,12 +65,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // 3. Request object from Cloudflare R2 S3-Compatible bucket
     const objectKey = `rooms/${roomId}/${fileId}`;
+    const { R2_BUCKET_NAME } = getR2Config();
     const command = new GetObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME || "veilo-chat-media",
+      Bucket: R2_BUCKET_NAME,
       Key: objectKey,
     });
 
-    const s3Response = await r2.send(command);
+    const s3Response = await createR2Client().send(command);
 
     if (!s3Response.Body) {
       return new NextResponse("Asset Not Found.", { status: 404 });

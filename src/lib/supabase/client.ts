@@ -1,46 +1,51 @@
 import { createBrowserClient } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 
 let cachedClient: ReturnType<typeof createBrowserClient> | null = null;
+const E2E_USER_COOKIE = "veilo-e2e-user-id";
+
+function getBrowserE2EMockUserId() {
+  if (
+    process.env.NODE_ENV === "production" ||
+    process.env.NEXT_PUBLIC_VEILO_E2E_AUTH_ENABLED !== "true"
+  ) {
+    return null;
+  }
+
+  const match = document.cookie.match(new RegExp(`(?:^|; )${E2E_USER_COOKIE}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 export function createClient() {
-  let client;
-
   if (typeof window === "undefined") {
-    client = createBrowserClient(
+    return createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-  } else {
-    if (!cachedClient) {
-      cachedClient = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-    }
-    client = cachedClient;
   }
 
-  // E2E Test Authentication Mock Bypass (evaluated dynamically at runtime)
-  if (typeof window !== "undefined" && client.auth && !client.auth.getUser.toString().includes("mockUserId")) {
-    const originalGetUser = client.auth.getUser.bind(client.auth);
-    client.auth.getUser = async (...args: any[]) => {
-      const match = document.cookie.match(/veilo-e2e-user-id=([^;]+)/);
-      const mockUserId = match ? match[1] : undefined;
+  if (!cachedClient) {
+    cachedClient = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
 
-      if (mockUserId) {
+    const mockUserId = getBrowserE2EMockUserId();
+    if (mockUserId) {
+      const originalAuth = cachedClient.auth;
+      originalAuth.getUser = async () => {
         return {
           data: {
             user: {
               id: mockUserId,
               email: "test@myamu.ac.in",
-            } as any,
+            } as User,
           },
           error: null,
         };
-      }
-      return originalGetUser(...args);
-    };
+      };
+    }
   }
 
-  return client;
+  return cachedClient;
 }

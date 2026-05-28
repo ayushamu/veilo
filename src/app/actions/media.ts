@@ -4,16 +4,33 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createClient } from "@/lib/supabase/server";
 
-// Cloudflare R2 S3-Compatible Client Initialization
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID || "mock-access-key",
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "mock-secret-key",
-  },
-  forcePathStyle: true, // Crucial for Cloudflare R2 path-style URLs to resolve DNS
-});
+const ALLOWED_UPLOAD_CONTENT_TYPE = "image/webp";
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+
+function getR2Config() {
+  const { CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME } =
+    process.env;
+
+  if (!CLOUDFLARE_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME) {
+    throw new Error("R2 media storage is not configured.");
+  }
+
+  return { CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME };
+}
+
+function createR2Client() {
+  const { CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = getR2Config();
+
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: R2_ACCESS_KEY_ID,
+      secretAccessKey: R2_SECRET_ACCESS_KEY,
+    },
+    forcePathStyle: true,
+  });
+}
 
 export interface PresignedResponse {
   uploadUrl: string;
@@ -27,9 +44,18 @@ export interface PresignedResponse {
 export async function getPresignedUploadUrl(
   roomId: string,
   fileName: string,
-  contentType: string
+  contentType: string,
+  fileSizeBytes: number
 ): Promise<{ success: boolean; message?: string; data?: PresignedResponse }> {
   try {
+    if (contentType !== ALLOWED_UPLOAD_CONTENT_TYPE) {
+      return { success: false, message: "Only optimized WebP images can be uploaded." };
+    }
+
+    if (!Number.isFinite(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > MAX_UPLOAD_BYTES) {
+      return { success: false, message: "Images must be 15 MB or smaller." };
+    }
+
     const supabase = await createClient();
 
     // 1. Authenticate user session
@@ -61,15 +87,16 @@ export async function getPresignedUploadUrl(
     const fileId = crypto.randomUUID();
     const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
     const objectKey = `rooms/${roomId}/${fileId}-${cleanFileName}`;
+    const { R2_BUCKET_NAME } = getR2Config();
 
     const command = new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME || "veilo-chat-media",
+      Bucket: R2_BUCKET_NAME,
       Key: objectKey,
       ContentType: contentType,
     });
 
     // Sign the URL with 15-minute expiration
-    const uploadUrl = await getSignedUrl(r2, command, { expiresIn: 900 });
+    const uploadUrl = await getSignedUrl(createR2Client(), command, { expiresIn: 900 });
 
     return {
       success: true,
