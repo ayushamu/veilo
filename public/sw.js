@@ -18,14 +18,28 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log("[sw.js] Received background message ", payload);
   
-  // Exclusively DMs for Phase 1
-  const title = payload.notification?.title || "New Message";
+  const title = payload.notification?.title || payload.data?.title || "Veilo Message";
+  const body = payload.notification?.body || payload.data?.body || "";
+  
   const options = {
-    body: payload.notification?.body || "",
-    icon: payload.notification?.icon || "/icon-192.png",
-    badge: "/icon-192.png",
+    body: body,
+    icon: payload.notification?.icon || payload.data?.icon || "/icon-192.png",
+    badge: "/icon-192.png", // Monochrome mask icon for status bar
+    image: payload.notification?.image || payload.data?.image || undefined,
     data: payload.data || {},
-    tag: payload.data?.roomId ? `chat-room-${payload.data.roomId}` : "general-dm"
+    tag: payload.data?.roomId ? `chat-room-${payload.data.roomId}` : "general-dm",
+    renotify: true, // Forces sound & vibration on existing active notification groups
+    vibrate: [200, 100, 200], // Premium double-pulse vibration haptics
+    actions: [
+      {
+        action: "enter",
+        title: "💬 Chat Now"
+      },
+      {
+        action: "dismiss",
+        title: "✕ Dismiss"
+      }
+    ]
   };
 
   self.registration.showNotification(title, options);
@@ -34,6 +48,11 @@ messaging.onBackgroundMessage((payload) => {
 // Handle Notification Clicks (PWA Deep-Link Reuse, zero tab duplication)
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+
+  // If user clicked the custom "Dismiss" action, abort immediately
+  if (event.action === "dismiss") {
+    return;
+  }
 
   const roomId = event.notification.data?.roomId;
   const targetUrl = roomId ? `/chats/${roomId}` : "/chats";

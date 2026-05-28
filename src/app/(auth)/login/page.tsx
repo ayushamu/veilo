@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { sendOTP } from "@/app/actions/auth";
+import { sendOTP, signInWithPassword, signUpWithPassword, sendPasswordReset } from "@/app/actions/auth";
 import { getActiveUserCount } from "@/app/actions/profile";
 
 interface SignupEvent {
@@ -141,6 +141,10 @@ const TERMS_SECTIONS = [
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
+  const [loginMode, setLoginMode] = useState<"password" | "otp">("password");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [showTerms, setShowTerms] = useState(false);
@@ -221,13 +225,80 @@ export default function LoginPage() {
     setLoading(true);
     setErrorMsg("");
 
-    const res = await sendOTP(email);
+    const sanitizedEmail = email.trim().toLowerCase();
+
+    if (activeTab === "signin") {
+      if (loginMode === "password") {
+        if (!password) {
+          setErrorMsg("Please enter your password.");
+          setLoading(false);
+          return;
+        }
+        const res = await signInWithPassword(sanitizedEmail, password);
+        setLoading(false);
+
+        if (res.success && res.data) {
+          if (res.data.status === "onboarding") {
+            router.push("/onboarding");
+          } else {
+            router.push("/chats");
+          }
+        } else {
+          setErrorMsg(res.message || "Incorrect email or password. Please try again.");
+        }
+      } else {
+        // OTP Mode login
+        const res = await sendOTP(sanitizedEmail);
+        setLoading(false);
+
+        if (res.success) {
+          router.push(`/verify?email=${encodeURIComponent(sanitizedEmail)}`);
+        } else {
+          setErrorMsg(res.message || "Failed to trigger verification code. Please try again.");
+        }
+      }
+    } else {
+      // Create Account (Sign Up)
+      if (!password) {
+        setErrorMsg("Please enter a password.");
+        setLoading(false);
+        return;
+      }
+
+      if (password.length < 6) {
+        setErrorMsg("Password must be at least 6 characters.");
+        setLoading(false);
+        return;
+      }
+
+      const res = await signUpWithPassword(sanitizedEmail, password);
+      setLoading(false);
+
+      if (res.success) {
+        router.push(`/verify?email=${encodeURIComponent(sanitizedEmail)}&flow=signup`);
+      } else {
+        setErrorMsg(res.message || "Failed to create account. Please try again.");
+      }
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setErrorMsg("Please enter your email address first to reset password.");
+      return;
+    }
+    
+    setLoading(true);
+    setErrorMsg("");
+    const sanitizedEmail = email.trim().toLowerCase();
+    
+    const res = await sendPasswordReset(sanitizedEmail);
     setLoading(false);
 
     if (res.success) {
-      router.push(`/verify?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+      router.push(`/verify?email=${encodeURIComponent(sanitizedEmail)}&flow=reset`);
     } else {
-      setErrorMsg(res.message || "Something went wrong. Please check your connection.");
+      setErrorMsg(res.message || "Failed to send reset code. Please try again.");
     }
   };
 
@@ -270,15 +341,15 @@ export default function LoginPage() {
       {/* Floating Verification Toast Notification */}
       {currentToast && (
         <div
-          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-[400px] pointer-events-none"
+          className="absolute top-4 left-1/2 z-50 w-[calc(100%-2rem)] max-w-[400px] pointer-events-none"
+          style={{
+            animation: toastVisible 
+              ? "toastIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards" 
+              : "toastOut 0.4s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards"
+          }}
         >
           <div
             className="w-full bg-[#12121A]/95 border border-[#00F0A0]/20 backdrop-blur-xl p-3.5 rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.85)] flex items-center gap-3 pointer-events-auto overflow-hidden relative"
-            style={{
-              animation: toastVisible 
-                ? "toastIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards" 
-                : "toastOut 0.4s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards"
-            }}
           >
             {/* Glowing Icon Container */}
             <div className="w-10 h-10 rounded-full bg-[#00F0A0]/10 border border-[#00F0A0]/35 flex items-center justify-center text-xl shrink-0 shadow-[0_0_12px_rgba(0,240,160,0.15)] animate-pulse">
@@ -370,9 +441,42 @@ export default function LoginPage() {
 
         {/* Onboarding Form Card */}
         <section className="w-full bg-[#12121A]/85 backdrop-blur-xl border border-zinc-800/80 p-6 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.7)] text-left">
-          <form className="space-y-5" onSubmit={handleSubmit}>
+          {/* Tab Selector */}
+          <div className="flex bg-[#08080C]/80 p-1 rounded-xl border border-zinc-900 mb-5">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("signin");
+                setErrorMsg("");
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                activeTab === "signin"
+                  ? "bg-[#00F0A0] text-black shadow-md"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("signup");
+                setErrorMsg("");
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                activeTab === "signup"
+                  ? "bg-[#00F0A0] text-black shadow-md"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              Create Account
+            </button>
+          </div>
+
+          <form className="space-y-4" onSubmit={handleSubmit}>
+            {/* Email Field */}
             <div className="space-y-1.5">
-              <label htmlFor="email" className="text-sm font-semibold text-zinc-300 ml-1">
+              <label htmlFor="email" className="text-xs font-semibold text-zinc-300 ml-1">
                 University Email
               </label>
               <div className="relative group">
@@ -393,44 +497,151 @@ export default function LoginPage() {
                   }}
                   className={`w-full bg-[#08080C]/80 border ${
                     errorMsg ? "border-red-500/80 focus:ring-red-500/40" : "border-zinc-800 focus:border-[#00F0A0] focus:ring-[#00F0A0]/20"
-                  } text-white font-sans text-base rounded-xl py-3.5 pl-11 pr-4 focus:ring-4 focus:outline-none transition-all placeholder:text-zinc-600`}
+                  } text-white font-sans text-sm rounded-xl py-3 pl-11 pr-4 focus:ring-4 focus:outline-none transition-all placeholder:text-zinc-600`}
                   placeholder="yourname@myamu.ac.in"
                 />
               </div>
+            </div>
 
-              <div className="flex items-center justify-between mt-1">
-                <p className={`text-[11px] ml-1 ${errorMsg ? "text-red-400 font-medium" : "text-zinc-500"}`}>
-                  {errorMsg || "Must end with @myamu.ac.in or @amu.ac.in"}
-                </p>
-                {!errorMsg && (
+            {/* Password Fields */}
+            {activeTab === "signin" ? (
+              // Sign In Fields
+              loginMode === "password" ? (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center px-1">
+                    <label htmlFor="password" className="text-xs font-semibold text-zinc-300">
+                      Password
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-[10px] text-[#00F0A0] hover:underline font-semibold focus:outline-none cursor-pointer"
+                    >
+                      Forgot?
+                    </button>
+                  </div>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-zinc-500 group-focus-within:text-[#00F0A0] transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                    </div>
+                    <input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      required
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        setErrorMsg("");
+                      }}
+                      className="w-full bg-[#08080C]/80 border border-zinc-800 focus:border-[#00F0A0] focus:ring-[#00F0A0]/20 text-white font-sans text-sm rounded-xl py-3 pl-11 pr-12 focus:ring-4 focus:outline-none transition-all placeholder:text-zinc-600"
+                      placeholder="Enter password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-zinc-500 hover:text-white transition-colors focus:outline-none cursor-pointer"
+                    >
+                      {showPassword ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : null
+            ) : (
+              // Create Account Fields
+              <div className="space-y-1.5">
+                <label htmlFor="password" className="text-xs font-semibold text-zinc-300 ml-1">
+                  Choose Password
+                </label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-zinc-500 group-focus-within:text-[#00F0A0] transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                  </div>
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setErrorMsg("");
+                    }}
+                    className="w-full bg-[#08080C]/80 border border-zinc-800 focus:border-[#00F0A0] focus:ring-[#00F0A0]/20 text-white font-sans text-sm rounded-xl py-3 pl-11 pr-12 focus:ring-4 focus:outline-none transition-all placeholder:text-zinc-600"
+                    placeholder="At least 6 characters"
+                  />
                   <button
                     type="button"
-                    onClick={() => setShowEmailHelp(true)}
-                    className="text-[11px] text-[#00F0A0] hover:underline font-semibold focus:outline-none cursor-pointer"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-zinc-500 hover:text-white transition-colors focus:outline-none cursor-pointer"
                   >
-                    No uni email?
+                    {showPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
                   </button>
-                )}
+                </div>
               </div>
+            )}
+
+            {/* Error Message and Help Links */}
+            <div className="flex items-center justify-between mt-1">
+              <p className={`text-[10px] ml-1 ${errorMsg ? "text-red-400 font-medium" : "text-zinc-500"}`}>
+                {errorMsg || "Must end with @myamu.ac.in or @amu.ac.in"}
+              </p>
+              {!errorMsg && (
+                <button
+                  type="button"
+                  onClick={() => setShowEmailHelp(true)}
+                  className="text-[10px] text-[#00F0A0] hover:underline font-semibold focus:outline-none cursor-pointer"
+                >
+                  No uni email?
+                </button>
+              )}
             </div>
 
             {/* Action button */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#00F0A0] text-black font-semibold text-base py-3.5 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-200 cursor-pointer shadow-[0_0_20px_rgba(0,240,160,0.2)] hover:shadow-[0_0_30px_rgba(0,240,160,0.35)] disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full bg-[#00F0A0] text-black font-semibold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-200 cursor-pointer shadow-[0_0_20px_rgba(0,240,160,0.2)] hover:shadow-[0_0_30px_rgba(0,240,160,0.35)] disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <>
-                  <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-black" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-black" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  Sending code...
+                  Processing...
                 </>
               ) : (
                 <>
-                  Verify &amp; Join
+                  {activeTab === "signin"
+                    ? loginMode === "password"
+                      ? "Sign In"
+                      : "Send Verification Code"
+                    : "Create Account & Verify"}
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="5" y1="12" x2="19" y2="12" />
                     <polyline points="12 5 19 12 12 19" />
@@ -438,6 +649,24 @@ export default function LoginPage() {
                 </>
               )}
             </button>
+
+            {/* Sign In Mode Toggle */}
+            {activeTab === "signin" && (
+              <div className="text-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMode(loginMode === "password" ? "otp" : "password");
+                    setErrorMsg("");
+                  }}
+                  className="text-[11px] text-[#00F0A0]/90 hover:text-[#00F0A0] hover:underline font-semibold focus:outline-none cursor-pointer"
+                >
+                  {loginMode === "password"
+                    ? "Sign in with Verification Code (OTP) instead"
+                    : "Sign in with Password instead"}
+                </button>
+              </div>
+            )}
           </form>
 
           {/* Privacy disclaimer */}

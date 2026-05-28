@@ -65,6 +65,7 @@ export default async function ProfilePage() {
         maskedEmail,
         joinedDate,
         blockCount: blockCount || 0,
+        hasPassword: profile.has_password,
       }}
     />
   );

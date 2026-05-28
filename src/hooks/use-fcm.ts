@@ -13,11 +13,17 @@ export function useFcm() {
 
   // Check support on mount
   useEffect(() => {
-    const supported =
-      typeof window !== "undefined" &&
-      "serviceWorker" in navigator &&
-      "PushManager" in window;
+    const swInNav = typeof window !== "undefined" && "serviceWorker" in navigator;
+    const pmInWin = typeof window !== "undefined" && "PushManager" in window;
+    const supported = swInNav && pmInWin;
     setIsSupported(supported);
+
+    console.log("🔍 [FCM Hook] Compatibility check:", {
+      isSupported: supported,
+      serviceWorkerSupported: swInNav,
+      pushManagerSupported: pmInWin,
+      currentPermission: typeof window !== "undefined" ? Notification.permission : "default"
+    });
 
     if (supported) {
       setPermission(Notification.permission);
@@ -26,22 +32,23 @@ export function useFcm() {
 
   const registerToken = useCallback(async () => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      console.warn("🔍 [FCM Hook] Registration aborted: Browser compatibility missing.");
       return null;
     }
 
     const messaging = getFirebaseMessaging();
     if (!messaging) {
-      console.warn("FCM messaging client is not initialized.");
+      console.warn("🔍 [FCM Hook] Registration aborted: FCM messaging client is not initialized.");
       return null;
     }
 
     try {
+      console.log("🔍 [FCM Hook] Registering token... Waiting for service worker ready state.");
       const registration = await navigator.serviceWorker.ready;
-      const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY;
+      console.log("🔍 [FCM Hook] Service Worker ready. Scope:", registration.scope);
 
-      if (!vapidKey) {
-        console.warn("NEXT_PUBLIC_FIREBASE_VAPID_KEY is not defined in environment variables.");
-      }
+      const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY;
+      console.log("🔍 [FCM Hook] VAPID Key from env:", vapidKey ? `${vapidKey.substring(0, 10)}...` : "UNDEFINED!");
 
       const currentToken = await getToken(messaging, {
         vapidKey,
@@ -71,7 +78,7 @@ export function useFcm() {
           if (error) {
             console.error("Failed to register token in Supabase fcm_tokens table:", error);
           } else {
-            console.log("FCM registration token synchronized successfully.");
+            console.log("🔍 [FCM Hook] Token synchronized successfully:", currentToken);
           }
         }
         return currentToken;

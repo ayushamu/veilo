@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/common/BottomNav";
-import { signOut } from "@/app/actions/auth";
+import { signOut, setUserPassword } from "@/app/actions/auth";
 import { useFcm } from "@/hooks/use-fcm";
 
 interface ProfileSummary {
@@ -13,6 +13,7 @@ interface ProfileSummary {
   maskedEmail: string;
   joinedDate: string;
   blockCount: number;
+  hasPassword: boolean;
 }
 
 interface ProfileClientProps {
@@ -23,7 +24,49 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
+  
+  // Password setting/change states
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [pwdError, setPwdError] = useState("");
+  const [pwdSuccess, setPwdSuccess] = useState("");
+  const [hasPasswordState, setHasPasswordState] = useState(profileSummary.hasPassword);
+
   const { permission, requestPermission, loading: fcmLoading } = useFcm();
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdError("");
+    setPwdSuccess("");
+
+    if (!newPassword) {
+      setPwdError("Password cannot be empty.");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPwdError("Password must be at least 6 characters.");
+      return;
+    }
+
+    setPwdLoading(true);
+    const res = await setUserPassword(newPassword);
+    setPwdLoading(false);
+
+    if (res.success) {
+      setPwdSuccess("Password updated successfully!");
+      setHasPasswordState(true);
+      setNewPassword("");
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPwdSuccess("");
+      }, 1500);
+    } else {
+      setPwdError(res.message || "Failed to update password. Please try again.");
+    }
+  };
 
   // Clear cache handler
   const handleClearCache = async () => {
@@ -151,6 +194,41 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
                 </div>
               </div>
             </div>
+
+            {/* Password Authentication row */}
+            <button
+              onClick={() => {
+                setShowPasswordModal(true);
+                setPwdError("");
+                setPwdSuccess("");
+              }}
+              className="w-full p-4 flex items-center justify-between hover:bg-zinc-800/15 active:bg-zinc-800/35 transition-colors duration-150 text-left border-none focus:outline-none cursor-pointer"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="bg-zinc-900/80 p-2.5 rounded-xl text-[#00F0A0] flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-white">Password Authentication</p>
+                  <p className="text-xs text-zinc-500 font-sans mt-0.5">
+                    {hasPasswordState 
+                      ? "Password login active. Tap to change." 
+                      : "OTP login only. Tap to set password."}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                  hasPasswordState ? "bg-[#00F0A0]/10 text-[#00F0A0]" : "bg-yellow-500/10 text-yellow-500"
+                }`}>
+                  {hasPasswordState ? "Active" : "Not Set"}
+                </span>
+                <svg className="text-zinc-500" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </div>
+            </button>
 
             {/* Cryptographic Isolation Lock info row */}
             <div className="p-4 flex items-start gap-3.5">
@@ -417,6 +495,117 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
             >
               Accept Guidelines
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Password Management Modal */}
+      {showPasswordModal && (
+        <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0"
+            onClick={() => setShowPasswordModal(false)}
+          />
+
+          {/* Modal Content */}
+          <div className="relative w-full sm:max-w-md bg-[#12121A] border border-zinc-900 rounded-t-3xl sm:rounded-3xl p-6 space-y-5 shadow-2xl z-10">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-900/60">
+              <h4 className="text-lg font-black font-heading text-white flex items-center gap-2">
+                <span className="text-[#00F0A0]">🔑</span> 
+                {hasPasswordState ? "Change Password" : "Set Password"}
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowPasswordModal(false)}
+                className="w-8 h-8 rounded-full bg-zinc-800/80 hover:bg-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90 cursor-pointer"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Form */}
+            {pwdSuccess ? (
+              <div className="py-6 text-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-[#00F0A0]/15 border border-[#00F0A0]/30 text-[#00F0A0] flex items-center justify-center text-xl mx-auto shadow-[0_0_15px_rgba(0,240,160,0.15)]">
+                  ✓
+                </div>
+                <p className="text-sm font-bold text-white">{pwdSuccess}</p>
+              </div>
+            ) : (
+              <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="modalPassword" className="text-xs font-semibold text-zinc-400 ml-1">
+                    {hasPasswordState ? "New Password" : "Password"}
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-zinc-500 group-focus-within:text-[#00F0A0] transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                    </div>
+                    <input
+                      id="modalPassword"
+                      type={showPassword ? "text" : "password"}
+                      required
+                      value={newPassword}
+                      onChange={(e) => {
+                        setNewPassword(e.target.value);
+                        setPwdError("");
+                      }}
+                      placeholder="At least 6 characters"
+                      className="w-full bg-[#08080C]/80 border border-zinc-800 focus:border-[#00F0A0] focus:ring-[#00F0A0]/20 text-white font-sans text-sm rounded-xl py-3 pl-11 pr-12 focus:ring-4 focus:outline-none transition-all placeholder:text-zinc-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-zinc-500 hover:text-white transition-colors focus:outline-none cursor-pointer"
+                    >
+                      {showPassword ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {pwdError && (
+                  <p className="text-xs text-red-400 font-medium ml-1">
+                    {pwdError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={pwdLoading}
+                  className="w-full py-3 bg-[#00F0A0] text-black font-bold rounded-2xl hover:bg-[#00d28d] active:scale-95 duration-150 focus:outline-none cursor-pointer text-center text-sm flex items-center justify-center gap-1.5"
+                >
+                  {pwdLoading ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-black" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Updating...
+                    </>
+                  ) : (
+                    hasPasswordState ? "Change Password" : "Set Password"
+                  )}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

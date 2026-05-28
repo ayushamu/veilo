@@ -64,6 +64,12 @@ export async function sendDmNotification({
   messageText,
 }: SendDmNotificationPayload) {
   try {
+    // 0. Safety Guard: Bypasses push notifications for the Global Campus-Wide Room to prevent
+    // server-less timeouts, database CPU locks, and student haptic alert spam.
+    if (roomId === "00000000-0000-0000-0000-000000000000") {
+      return { success: true, reason: "Bypassed Global shared room notifications" };
+    }
+
     const supabase = await createClient();
 
     // 1. Authenticate the sending user
@@ -81,36 +87,22 @@ export async function sendDmNotification({
       .single();
     const senderNickname = senderProfile?.nickname || "Anonymous Student";
 
-    // 3. Fetch the recipient ID (the other participant in the DM room)
-    const { data: participantData, error: participantError } = await supabase
-      .from("room_participants")
-      .select("profile_id")
-      .eq("room_id", roomId)
-      .not("profile_id", "eq", user.id)
-      .maybeSingle();
-
-    if (participantError || !participantData) {
-      console.log("No recipient participant found for room:", roomId);
-      return { success: true, sentCount: 0 };
-    }
-
-    const recipientId = participantData.profile_id;
-
-    // 4. Fetch active recipient tokens using secure database RPC (verifies membership + blocks)
-    const { data: tokens, error: rpcError } = await supabase.rpc("get_recipient_fcm_tokens", {
-      recipient_id: recipientId,
+    // 3. Fetch active recipient tokens in the room using secure database RPC (verifies membership + blocks)
+    const { data: tokensData, error: rpcError } = await supabase.rpc("get_room_recipient_fcm_tokens", {
       room_id: roomId,
     });
 
     if (rpcError) {
-      console.error("Error executing get_recipient_fcm_tokens RPC:", rpcError);
+      console.error("Error executing get_room_recipient_fcm_tokens RPC:", rpcError);
       return { success: false, reason: "Database verification failed" };
     }
 
-    if (!tokens || tokens.length === 0) {
-      console.log("No active push tokens registered for recipient:", recipientId);
+    if (!tokensData || tokensData.length === 0) {
+      console.log("No active push tokens registered for recipients in room:", roomId);
       return { success: true, sentCount: 0 };
     }
+
+    const tokens = tokensData.map((t: any) => t.token);
 
     // 5. Fetch service account JSON from environment
     const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
@@ -154,6 +146,19 @@ export async function sendDmNotification({
               icon: "/icon-192.png",
               badge: "/icon-192.png",
               click_action: `/chats/${roomId}`,
+              vibrate: [200, 100, 200], // Double-pulse haptics
+              renotify: true, // Plays alerts on subsequent updates
+              tag: `room-dm-${roomId}`, // Groups chats by room ID thread
+              actions: [
+                {
+                  action: "enter",
+                  title: "💬 Chat Now"
+                },
+                {
+                  action: "dismiss",
+                  title: "✕ Dismiss"
+                }
+              ]
             },
           },
         },
