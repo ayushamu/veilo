@@ -105,11 +105,11 @@ export async function getPresignedUploadUrl(
         fileUrl: `/api/media/${roomId}/${fileId}-${cleanFileName}`, // Dynamic secure proxy route
       },
     };
-  } catch (err) {
+  } catch (err: any) {
     console.error("Error generating presigned R2 upload tunnel:", err);
     return {
       success: false,
-      message: "Server failed to establish secure upload connection.",
+      message: err.message || "Server failed to establish secure upload connection.",
     };
   }
 }
