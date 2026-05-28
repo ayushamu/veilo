@@ -53,6 +53,36 @@ export default function MessageComposer({
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    
+    // Normalize line breaks and limit consecutive blank lines to maximum 2 newlines
+    const cleanedText = text
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\n{3,}/g, "\n\n");
+
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setInputText((prev) => prev + cleanedText);
+      return;
+    }
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const currentVal = textarea.value;
+
+    const newVal = currentVal.substring(0, start) + cleanedText + currentVal.substring(end);
+    setInputText(newVal);
+
+    // Restore cursor focus position
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + cleanedText.length, start + cleanedText.length);
+    }, 0);
+  };
+
   // Debounced typing notifications
   useEffect(() => {
     if (!inputText) {
@@ -210,6 +240,7 @@ export default function MessageComposer({
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}

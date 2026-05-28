@@ -521,7 +521,7 @@ export default function DiscoverClient({
   };
 
   return (
-    <main className="flex-1 flex flex-col bg-[#08080C] min-h-screen pb-24 overflow-hidden relative">
+    <main className="flex-1 flex flex-col bg-[#08080C] h-full pb-24 overflow-hidden relative">
       {/* Background gradients */}
       <div className="absolute top-[-20%] left-[-20%] w-[80%] h-[60%] rounded-full bg-[#00F0A0]/3 blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[50%] rounded-full bg-purple-500/3 blur-[120px] pointer-events-none" />

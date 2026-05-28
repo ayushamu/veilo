@@ -4,18 +4,32 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { ADJECTIVES, NOUNS, EMOJIS } from "@/lib/constants/identity";
 import { submitOnboarding } from "@/app/actions/profile";
+import { VeiloAvatar, AvatarConfig } from "@/components/avatar/VeiloAvatar";
+import {
+  AvatarCustomizer,
+  HAIR_OPTIONS,
+  HAIR_COLORS,
+  EYES_OPTIONS,
+  EYEBROWS_OPTIONS,
+  MOUTH_OPTIONS,
+  NOSE_OPTIONS,
+  GLASSES_OPTIONS,
+  EARRINGS_OPTIONS,
+} from "@/components/avatar/AvatarCustomizer";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [gender, setGender] = useState<"male" | "female" | "other">("male");
   const [nickname, setNickname] = useState("");
   const [avatar, setAvatar] = useState("");
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>({});
+  const [customizerOpen, setCustomizerOpen] = useState(false);
   
   const [animating, setAnimating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Shuffles a new identity based on gender
+  // Shuffles a new identity based on gender and randomizes visual traits
   const shuffleIdentity = (overrideGender?: "male" | "female" | "other") => {
     setAnimating(true);
     setErrorMsg("");
@@ -28,8 +42,27 @@ export default function OnboardingPage() {
       const randomNoun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
       const randomEmoji = emojiPool[Math.floor(Math.random() * emojiPool.length)];
 
+      const randomHair = HAIR_OPTIONS[Math.floor(Math.random() * HAIR_OPTIONS.length)].value;
+      const randomHairColor = HAIR_COLORS[Math.floor(Math.random() * HAIR_COLORS.length)].value;
+      const randomEyes = EYES_OPTIONS[Math.floor(Math.random() * EYES_OPTIONS.length)].value;
+      const randomEyebrows = EYEBROWS_OPTIONS[Math.floor(Math.random() * EYEBROWS_OPTIONS.length)].value;
+      const randomMouth = MOUTH_OPTIONS[Math.floor(Math.random() * MOUTH_OPTIONS.length)].value;
+      const randomNose = NOSE_OPTIONS[Math.floor(Math.random() * NOSE_OPTIONS.length)].value;
+      const randomGlasses = GLASSES_OPTIONS[Math.floor(Math.random() * GLASSES_OPTIONS.length)].value;
+      const randomEarrings = EARRINGS_OPTIONS[Math.floor(Math.random() * EARRINGS_OPTIONS.length)].value;
+
       setNickname(`${randomAdj} ${randomNoun}`);
       setAvatar(randomEmoji);
+      setAvatarConfig({
+        hair: randomHair,
+        hairColor: randomHairColor,
+        eyes: randomEyes,
+        eyebrows: randomEyebrows,
+        mouth: randomMouth,
+        nose: randomNose,
+        glasses: randomGlasses,
+        earrings: randomEarrings,
+      });
       setAnimating(false);
     }, 250);
   };
@@ -55,7 +88,7 @@ export default function OnboardingPage() {
     setLoading(true);
     setErrorMsg("");
 
-    const res = await submitOnboarding(nickname, gender, avatar);
+    const res = await submitOnboarding(nickname, gender, avatar, avatarConfig);
     setLoading(false);
 
     if (res.success) {
@@ -66,7 +99,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main className="flex-1 flex flex-col justify-between px-6 py-8 relative overflow-hidden bg-[#08080C] min-h-screen">
+    <main className="flex-1 flex flex-col justify-between px-6 py-8 relative overflow-y-auto bg-[#08080C] h-full">
       {/* AppBar Header */}
       <header className="flex items-center justify-between border-b border-zinc-900/60 pb-4 w-full">
         <div className="w-8" /> {/* Balance spacer */}
@@ -93,11 +126,27 @@ export default function OnboardingPage() {
 
         {/* Avatar Bubble */}
         <div
-          className={`relative w-40 h-40 rounded-full bg-[#12121A]/70 backdrop-blur-xl flex items-center justify-center border border-zinc-800/80 shadow-[0_0_40px_rgba(0,240,160,0.15)] mb-6 transition-all duration-300 ${
+          onClick={() => setCustomizerOpen(true)}
+          title="Click to customize"
+          className={`relative w-40 h-40 rounded-full bg-[#12121A]/70 backdrop-blur-xl flex items-center justify-center border border-zinc-800/80 shadow-[0_0_40px_rgba(0,240,160,0.15)] mb-6 transition-all duration-300 cursor-pointer hover:border-[#00F0A0]/60 active:scale-95 group ${
             animating ? "scale-75 opacity-0 rotate-12" : "scale-100 opacity-100 rotate-0"
           }`}
         >
-          <span className="text-7xl select-none">{avatar}</span>
+          <VeiloAvatar
+            seed={nickname}
+            config={avatarConfig}
+            size={144}
+            className="border-0 shadow-none hover:border-0"
+          />
+          {/* Edit Badge Hover Overlay */}
+          <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <span className="bg-[#00F0A0] text-black text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full flex items-center gap-1 shadow-md scale-90 group-hover:scale-100 transition-transform duration-200">
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+              </svg>
+              Edit
+            </span>
+          </div>
           <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-white/10 rounded-full pointer-events-none" />
         </div>
 
@@ -334,6 +383,16 @@ export default function OnboardingPage() {
           </p>
         </div>
       </div>
+      <AvatarCustomizer
+        seed={nickname}
+        initialConfig={avatarConfig}
+        isOpen={customizerOpen}
+        onClose={() => setCustomizerOpen(false)}
+        onSave={(newConfig) => {
+          setAvatarConfig(newConfig);
+          setCustomizerOpen(false);
+        }}
+      />
     </main>
   );
 }

@@ -2,6 +2,7 @@
 
 import React, { memo, useEffect } from "react";
 import { type Message } from "@/hooks/use-chat";
+import { VeiloAvatar } from "@/components/avatar/VeiloAvatar";
 
 interface MessageBubbleProps {
   id: string;
@@ -217,9 +218,14 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         <button
           type="button"
           onClick={() => onPeerClick(senderId, senderNickname || "Anonymous Student", senderAvatar || "👤")}
-          className="w-8 h-8 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800/80 hover:border-zinc-700 active:scale-95 duration-150 transition-all flex items-center justify-center text-base shadow-sm self-end mb-1 cursor-pointer select-none"
+          className="w-8 h-8 rounded-full flex-shrink-0 bg-[#12121A] border border-zinc-800/80 hover:border-zinc-700 active:scale-95 duration-150 transition-all flex items-center justify-center shadow-sm self-end mb-1 cursor-pointer select-none overflow-hidden"
         >
-          {senderAvatar}
+          <VeiloAvatar
+            seed={senderNickname || "Student"}
+            config={senderAvatar && senderAvatar.startsWith("{") ? senderAvatar : null}
+            size={32}
+            className="border-0 shadow-none hover:border-0"
+          />
         </button>
       )}
 
@@ -361,7 +367,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
               {content && content !== "Photo" && (
                 <p 
                   style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
-                  className="text-[14px] leading-relaxed font-sans mt-2"
+                  className="text-[14px] leading-relaxed font-sans mt-2 whitespace-pre-wrap"
                 >
                   {parseTextWithLinks(content, isMine)}
                 </p>
@@ -370,7 +376,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
           ) : (
             <p 
               style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
-              className={`leading-relaxed font-sans ${
+              className={`leading-relaxed font-sans whitespace-pre-wrap ${
                 type === "text" && isEmojiOnly(content)
                   ? "text-[32px] md:text-[36px]"
                   : "text-[14px]"

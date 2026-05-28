@@ -58,6 +58,7 @@ type SendMessageOptions = {
 type RawProfile = {
   nickname?: string;
   avatar_emoji?: string;
+  avatar_config?: any;
 };
 
 type RawMessage = {
@@ -160,7 +161,9 @@ function formatMessage(msg: RawMessage): Message {
     room_id: msg.room_id,
     sender_id: msg.sender_id,
     sender_nickname: profile?.nickname || "Anonymous Student",
-    sender_avatar: profile?.avatar_emoji || "👤",
+    sender_avatar: profile?.avatar_config && Object.keys(profile.avatar_config).length > 0
+      ? JSON.stringify(profile.avatar_config)
+      : profile?.avatar_emoji || "👤",
     content: msg.content,
     type: msg.type,
     media_url: msg.media_url || undefined,
@@ -329,7 +332,7 @@ export function useChat(
     try {
       let query = supabase
         .from("messages")
-        .select(`*, profiles (nickname, avatar_emoji)`)
+        .select(`*, profiles (nickname, avatar_emoji, avatar_config)`)
         .eq("room_id", roomId)
         .order("created_at", { ascending: true });
 
@@ -426,7 +429,7 @@ export function useChat(
         // 3. Fallback to Supabase for historical/cold messages
         let query = supabase
           .from("messages")
-          .select(`*, profiles (nickname, avatar_emoji)`)
+          .select(`*, profiles (nickname, avatar_emoji, avatar_config)`)
           .eq("room_id", roomId)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
@@ -518,13 +521,15 @@ export function useChat(
           if (!profile) {
             const { data } = await supabase
               .from("profiles")
-              .select("nickname, avatar_emoji")
+              .select("nickname, avatar_emoji, avatar_config")
               .eq("id", newMsg.sender_id)
               .maybeSingle();
 
             profile = {
               nickname: data?.nickname || "Anonymous Student",
-              avatar_emoji: data?.avatar_emoji || "👤",
+              avatar_emoji: data?.avatar_config && Object.keys(data.avatar_config).length > 0
+                ? JSON.stringify(data.avatar_config)
+                : data?.avatar_emoji || "👤",
             };
             profileCacheRef.current.set(newMsg.sender_id, profile);
           }
@@ -674,14 +679,16 @@ export function useChat(
           try {
             const { data } = await supabase
               .from("profiles")
-              .select("id, nickname, avatar_emoji")
+              .select("id, nickname, avatar_emoji, avatar_config")
               .in("id", missingUserIds);
 
             if (data) {
               data.forEach((p: any) => {
                 profileCacheRef.current.set(p.id, {
                   nickname: p.nickname,
-                  avatar_emoji: p.avatar_emoji
+                  avatar_emoji: p.avatar_config && Object.keys(p.avatar_config).length > 0
+                    ? JSON.stringify(p.avatar_config)
+                    : p.avatar_emoji || "👤"
                 });
               });
             }
@@ -796,7 +803,7 @@ export function useChat(
           reply_to_content: replyTo?.content,
           reply_to_sender_nickname: replyTo?.senderNickname,
         })
-        .select(`*, profiles (nickname, avatar_emoji)`)
+        .select(`*, profiles (nickname, avatar_emoji, avatar_config)`)
         .maybeSingle();
 
       if (error && shouldRetryWithoutClientMessageId(error)) {
@@ -809,7 +816,7 @@ export function useChat(
             type: options.type || "text",
             media_url: options.mediaUrl || null,
           })
-          .select(`*, profiles (nickname, avatar_emoji)`)
+          .select(`*, profiles (nickname, avatar_emoji, avatar_config)`)
           .maybeSingle();
 
         data = fallbackResult.data;

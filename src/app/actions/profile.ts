@@ -49,7 +49,8 @@ export async function checkNicknameAvailability(
 export async function submitOnboarding(
   nickname: string,
   gender: "male" | "female" | "other",
-  avatar_emoji: string
+  avatar_emoji: string,
+  avatar_config?: any
 ): Promise<ActionResponse> {
   try {
     const trimmedNickname = nickname.trim();
@@ -96,6 +97,7 @@ export async function submitOnboarding(
         nickname: trimmedNickname,
         gender,
         avatar_emoji,
+        avatar_config: avatar_config || {},
         status: "active", // Triggers auto-join to global room and hashing email trigger!
       })
       .eq("id", user.id);
@@ -239,4 +241,43 @@ export async function updatePresencePrivacy(
     return { success: false, message: "Server error occurred." };
   }
 }
+
+/**
+ * Updates the user's customized avatar config and fallback emoji.
+ */
+export async function updateAvatarConfig(
+  avatar_config: any,
+  avatar_emoji: string
+): Promise<ActionResponse> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return { success: false, message: "Session expired. Please log in again." };
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        avatar_config,
+        avatar_emoji,
+      })
+      .eq("id", user.id);
+
+    if (error) {
+      console.error("Failed to update avatar config:", error);
+      return { success: false, message: error.message || "Database update failed." };
+    }
+
+    return { success: true, message: "Avatar successfully updated!" };
+  } catch (err) {
+    console.error("Update avatar config server error:", err);
+    return { success: false, message: "An unexpected server error occurred." };
+  }
+}
+
 

@@ -5,11 +5,14 @@ import { useRouter } from "next/navigation";
 import BottomNav from "@/components/common/BottomNav";
 import { signOut, setUserPassword } from "@/app/actions/auth";
 import { useFcm } from "@/hooks/use-fcm";
-import { updatePresencePrivacy } from "@/app/actions/profile";
+import { updatePresencePrivacy, updateAvatarConfig } from "@/app/actions/profile";
+import { VeiloAvatar, AvatarConfig } from "@/components/avatar/VeiloAvatar";
+import { AvatarCustomizer } from "@/components/avatar/AvatarCustomizer";
 
 interface ProfileSummary {
   nickname: string;
   avatar_emoji: string;
+  avatar_config?: any;
   status: string;
   maskedEmail: string;
   joinedDate: string;
@@ -37,6 +40,29 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
   const [hasPasswordState, setHasPasswordState] = useState(profileSummary.hasPassword);
   const [showLastSeenState, setShowLastSeenState] = useState(profileSummary.showLastSeen);
   const [privacyLoading, setPrivacyLoading] = useState(false);
+
+  // Avatar Customizer states
+  const [avatarConfigState, setAvatarConfigState] = useState<AvatarConfig>(profileSummary.avatar_config || {});
+  const [customizerOpen, setCustomizerOpen] = useState(false);
+  const [savingAvatar, setSavingAvatar] = useState(false);
+
+  const handleSaveAvatar = async (newConfig: AvatarConfig) => {
+    setSavingAvatar(true);
+    try {
+      const res = await updateAvatarConfig(newConfig, profileSummary.avatar_emoji);
+      if (res.success) {
+        setAvatarConfigState(newConfig);
+        setCustomizerOpen(false);
+      } else {
+        alert(res.message || "Failed to update avatar. Please try again.");
+      }
+    } catch (err) {
+      console.error("Save avatar error:", err);
+      alert("An unexpected error occurred while saving your avatar.");
+    } finally {
+      setSavingAvatar(false);
+    }
+  };
 
   const handleTogglePresencePrivacy = async () => {
     if (privacyLoading) return;
@@ -134,7 +160,7 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
   };
 
   return (
-    <main className="flex-1 flex flex-col bg-[#08080C] min-h-screen pb-28">
+    <main className="flex-1 flex flex-col bg-[#08080C] h-full overflow-hidden pb-28">
       {/* 1. Sticky Header */}
       <header className="sticky top-0 z-40 bg-[#08080C]/85 backdrop-blur-md border-b border-zinc-900/60 px-6 py-4 flex items-center justify-between">
         <h1 className="text-2xl font-extrabold font-heading text-white tracking-tight">
@@ -150,9 +176,27 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
         
         {/* Identity Hero */}
         <section className="flex flex-col items-center text-center space-y-4 py-4 bg-gradient-to-b from-[#12121A]/35 to-transparent rounded-3xl border border-zinc-900/40 p-5">
-          {/* Glowing emoji avatar container */}
-          <div className="w-24 h-24 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700/50 flex items-center justify-center text-5xl shadow-[0_0_20px_rgba(0,240,160,0.15)] rounded-full select-none transform hover:scale-105 duration-300">
-            {profileSummary.avatar_emoji}
+          {/* Glowing interactive avatar container */}
+          <div 
+            onClick={() => setCustomizerOpen(true)}
+            title="Click to customize visual avatar"
+            className="relative w-24 h-24 bg-[#12121A] border border-zinc-800/80 flex items-center justify-center shadow-[0_0_20px_rgba(0,240,160,0.15)] rounded-full select-none transform hover:scale-105 cursor-pointer active:scale-95 duration-300 group overflow-hidden"
+          >
+            <VeiloAvatar
+              seed={profileSummary.nickname}
+              config={avatarConfigState}
+              size={96}
+              className="border-0 shadow-none hover:border-0"
+            />
+            {/* Edit overlay */}
+            <div className="absolute inset-0 bg-black/45 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              <span className="bg-[#00F0A0] text-black text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full flex items-center gap-0.5 shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                </svg>
+                Edit
+              </span>
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -667,6 +711,14 @@ export default function ProfileClient({ profileSummary }: ProfileClientProps) {
           </div>
         </div>
       )}
+      <AvatarCustomizer
+        seed={profileSummary.nickname}
+        initialConfig={avatarConfigState}
+        isOpen={customizerOpen}
+        onClose={() => setCustomizerOpen(false)}
+        onSave={handleSaveAvatar}
+        isSaving={savingAvatar}
+      />
     </main>
   );
 }

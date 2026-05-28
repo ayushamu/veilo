@@ -24,6 +24,7 @@ export default async function ChatRoomPage({ params }: PageProps) {
     <ChatRoomClient
       roomId={id}
       currentUserId={user.id}
+      currentUserEmail={user.email || ""}
     />
   );
 }

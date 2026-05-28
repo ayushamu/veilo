@@ -61,6 +61,7 @@ export default async function ProfilePage() {
       profileSummary={{
         nickname: profile.nickname,
         avatar_emoji: profile.avatar_emoji,
+        avatar_config: profile.avatar_config,
         status: profile.status,
         maskedEmail,
         joinedDate,

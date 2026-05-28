@@ -194,13 +194,15 @@ export const useInboxZustandStore = create<InboxState>((set, get) => {
           if (peerData?.profile_id) {
             const { data: peerProfile } = await supabase
               .from("profiles")
-              .select("nickname, avatar_emoji")
+              .select("nickname, avatar_emoji, avatar_config")
               .eq("id", peerData.profile_id)
               .maybeSingle();
 
             if (peerProfile) {
               name = peerProfile.nickname;
-              avatarEmoji = peerProfile.avatar_emoji;
+              avatarEmoji = peerProfile.avatar_config && Object.keys(peerProfile.avatar_config).length > 0
+                ? JSON.stringify(peerProfile.avatar_config)
+                : peerProfile.avatar_emoji;
             }
           }
         }

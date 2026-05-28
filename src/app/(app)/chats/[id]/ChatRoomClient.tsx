@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect as reactUseLayoutEffe
 const useLayoutEffect = typeof window !== "undefined" ? reactUseLayoutEffect : useEffect;
 import { useRouter } from "next/navigation";
 import { Message, ReplyDraft, useChat } from "@/hooks/use-chat";
+import { VeiloAvatar } from "@/components/avatar/VeiloAvatar";
 import { createClient } from "@/lib/supabase/client";
 import { submitSafetyReport } from "@/app/actions/report";
 import { useInboxStore, type InboxState } from "@/hooks/use-inbox-store";
@@ -25,6 +26,7 @@ interface ChatRoomClientProps {
     type: "direct" | "group";
   };
   currentUserId: string;
+  currentUserEmail?: string;
 }
 
 type SwipeState = {
@@ -85,6 +87,7 @@ export default function ChatRoomClient({
   roomId,
   initialRoomData,
   currentUserId,
+  currentUserEmail,
 }: ChatRoomClientProps) {
   const router = useRouter();
   
@@ -191,13 +194,15 @@ export default function ChatRoomClient({
           if (peer?.profile_id) {
             const { data: profile } = await supabase
               .from("profiles")
-              .select("nickname, avatar_emoji")
+              .select("nickname, avatar_emoji, avatar_config")
               .eq("id", peer.profile_id)
               .maybeSingle();
 
             if (profile) {
               rName = profile.nickname;
-              rAvatar = profile.avatar_emoji;
+              rAvatar = profile.avatar_config && Object.keys(profile.avatar_config).length > 0
+                ? JSON.stringify(profile.avatar_config)
+                : profile.avatar_emoji;
             }
           }
         }
@@ -354,17 +359,20 @@ export default function ChatRoomClient({
       const supabase = createClient();
       const { data } = await supabase
         .from("messages")
-        .select(`*, profiles (nickname, avatar_emoji)`)
+        .select(`*, profiles (nickname, avatar_emoji, avatar_config)`)
         .eq("id", pinId)
         .maybeSingle();
 
       if (data) {
+        const rawProfile = Array.isArray(data.profiles) ? data.profiles[0] : data.profiles;
         const formatted = {
           id: data.id,
           room_id: data.room_id,
           sender_id: data.sender_id,
-          sender_nickname: data.profiles?.nickname || "Anonymous Student",
-          sender_avatar: data.profiles?.avatar_emoji || "👤",
+          sender_nickname: rawProfile?.nickname || "Anonymous Student",
+          sender_avatar: rawProfile?.avatar_config && Object.keys(rawProfile.avatar_config).length > 0
+            ? JSON.stringify(rawProfile.avatar_config)
+            : rawProfile?.avatar_emoji || "👤",
           content: data.content,
           type: data.type,
           media_url: data.media_url || undefined,
@@ -996,12 +1004,47 @@ export default function ChatRoomClient({
 
           {/* Room Title */}
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-10 h-10 rounded-full flex-shrink-0 bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800/80 flex items-center justify-center text-xl shadow-sm relative select-none">
-              {roomData.avatar_emoji}
+            <div className="w-10 h-10 rounded-full flex-shrink-0 bg-[#12121A] border border-zinc-800/80 flex items-center justify-center shadow-sm relative select-none overflow-hidden">
+              {roomId === "11111111-1111-1111-1111-111111111111" ? (
+                <div className="w-full h-full bg-[#12121A] border border-[#00F0A0]/20 flex items-center justify-center relative overflow-hidden select-none shrink-0">
+                  <div className="absolute inset-0 bg-[#00F0A0]/5 blur-sm" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#00F0A0"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="w-4.5 h-4.5 relative z-10 drop-shadow-[0_0_6px_rgba(0,240,160,0.35)]"
+                  >
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                  </svg>
+                </div>
+              ) : (
+                <VeiloAvatar
+                  seed={roomData.name}
+                  config={roomData.avatar_emoji && roomData.avatar_emoji.startsWith("{") ? roomData.avatar_emoji : null}
+                  size={40}
+                  className="border-0 shadow-none hover:border-0"
+                />
+              )}
             </div>
             <div className="flex flex-col min-w-0">
-              <h1 className="text-[15px] font-bold text-white tracking-tight truncate">
-                {roomData.name}
+              <h1 className="text-[15px] font-bold text-white tracking-tight truncate flex items-center gap-1.5">
+                <span className="truncate">{roomData.name}</span>
+                {(roomId === "00000000-0000-0000-0000-000000000000" || 
+                  roomId === "11111111-1111-1111-1111-111111111111") && (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="w-4 h-4 text-[#00BFFF] shrink-0"
+                  >
+                    <title>Official Verified Channel</title>
+                    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                  </svg>
+                )}
               </h1>
               <div className="flex items-center gap-1.5 mt-0.5 select-none">
                 {roomData.type === "group" ? (
@@ -1286,8 +1329,13 @@ export default function ChatRoomClient({
         {/* Dynamic Typing indicator bubbles inside feed */}
         {typingUsers.map((user) => (
           <div key={user.id} className="flex gap-3 animate-pulse mt-2 select-none justify-start">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-800/80 flex items-center justify-center text-sm shadow-sm select-none">
-              {user.avatar_emoji}
+            <div className="w-8 h-8 rounded-full flex-shrink-0 bg-[#12121A] border border-zinc-800/80 flex items-center justify-center shadow-sm relative select-none overflow-hidden font-sans">
+              <VeiloAvatar
+                seed={user.nickname}
+                config={user.avatar_emoji && user.avatar_emoji.startsWith("{") ? user.avatar_emoji : null}
+                size={32}
+                className="border-0 shadow-none hover:border-0"
+              />
             </div>
             <div className="flex flex-col gap-1 max-w-[80%]">
               <span className="text-[10px] font-bold text-zinc-400 ml-1 font-sans">
@@ -1320,16 +1368,24 @@ export default function ChatRoomClient({
         )}
       </div>
 
-      {/* Input Form Bar */}
       {/* Input Composer Bar */}
-      <MessageComposer
-        onSend={handleSendMessage}
-        onAttachImage={handleFileUpload}
-        onAttachCamera={handleCameraUpload}
-        setTypingStatus={setTypingStatus}
-        replyingTo={replyingTo}
-        onCancelReply={() => setReplyingTo(null)}
-      />
+      {roomId === "11111111-1111-1111-1111-111111111111" && currentUserEmail !== "gp5282@myamu.ac.in" && currentUserEmail !== "ayushcmf@gmail.com" ? (
+        <div className="p-4.5 bg-[#0A0A0F] border-t border-zinc-900/60 flex items-center justify-center text-center gap-2.5 select-none shrink-0 w-full">
+          <span className="text-[#00BFFF] text-base animate-pulse">📢</span>
+          <span className="text-[10px] text-zinc-500 font-bold font-sans uppercase tracking-wider">
+            Only Veilo Admins can broadcast messages in this channel
+          </span>
+        </div>
+      ) : (
+        <MessageComposer
+          onSend={handleSendMessage}
+          onAttachImage={handleFileUpload}
+          onAttachCamera={handleCameraUpload}
+          setTypingStatus={setTypingStatus}
+          replyingTo={replyingTo}
+          onCancelReply={() => setReplyingTo(null)}
+        />
+      )}
 
       {copyToast && (
         <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[70] px-3.5 py-2 rounded-full bg-white text-black text-xs font-bold shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-150">
@@ -1568,8 +1624,13 @@ export default function ChatRoomClient({
             <div className="w-10 h-1 rounded-full bg-zinc-700 mx-auto mb-6" />
 
             <div className="flex flex-col items-center text-center mb-6">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 border-2 border-zinc-700/80 flex items-center justify-center text-4xl shadow-md mb-3 select-none">
-                {selectedPeerProfile.avatar_emoji}
+               <div className="w-20 h-20 rounded-full bg-[#12121A] border-2 border-zinc-800 flex items-center justify-center shadow-md mb-3 select-none overflow-hidden font-sans">
+                <VeiloAvatar
+                  seed={selectedPeerProfile.nickname}
+                  config={selectedPeerProfile.avatar_emoji && selectedPeerProfile.avatar_emoji.startsWith("{") ? selectedPeerProfile.avatar_emoji : null}
+                  size={80}
+                  className="border-0 shadow-none hover:border-0"
+                />
               </div>
               <h3 className="text-lg font-bold text-white tracking-tight">
                 {selectedPeerProfile.nickname}
